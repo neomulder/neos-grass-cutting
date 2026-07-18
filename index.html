@@ -475,6 +475,7 @@ function clientDueInfo(c) {
   const last = cuts[0] || null;
   if (!last) return { state: "new", label: "NEW — cut anytime", days: null, sort: 900 };
   const days = daysBetween(last.date, todayStr());
+  if (days < 0) return { state: "wait", label: "CUT LOGGED FOR " + fmtDayShort(last.date), days, sort: -1 };
   const freq = c.freq || 7;
   if (days > freq) return { state: "overdue", label: "OVERDUE — " + days + " days since cut", days, sort: 1000 + days };
   if (days === freq) return { state: "due", label: "DUE TODAY — " + days + " days since cut", days, sort: 950 };
@@ -759,6 +760,14 @@ document.querySelectorAll("#board-filters .chipbtn").forEach(b => {
 
 function closeSheet(id) { document.getElementById(id).classList.remove("open"); }
 
+let saveLock = false;
+function lockSave() {
+  if (saveLock) return true;
+  saveLock = true;
+  setTimeout(() => { saveLock = false; }, 500);
+  return false;
+}
+
 /* ================= cut modal ================= */
 let cutCtx = { clientId: null, cutId: null, paid: true };
 function openCutModal(clientId, cutId) {
@@ -787,6 +796,7 @@ function setCutPaid(v) {
   document.getElementById("c-paid-no").className = v ? "" : "on";
 }
 function saveCut() {
+  if (lockSave()) return;
   const date = document.getElementById("c-date").value;
   const amount = parseFloat(document.getElementById("c-amount").value);
   if (!date || isNaN(amount)) { alert("Need a date and an amount."); return; }
@@ -843,6 +853,7 @@ function setClFreq(f) {
   document.getElementById("cl-f14").className = f === 14 ? "on" : "";
 }
 function saveClient() {
+  if (lockSave()) return;
   const name = document.getElementById("cl-name").value.trim();
   if (!name) { alert("Client needs a name."); return; }
   const rec = {
@@ -893,6 +904,7 @@ function openExpenseModal(id) {
   document.getElementById("exp-overlay").classList.add("open");
 }
 function saveExpense() {
+  if (lockSave()) return;
   const date = document.getElementById("ex-date").value;
   const amount = parseFloat(document.getElementById("ex-amount").value);
   if (!date || isNaN(amount)) { alert("Need a date and an amount."); return; }
@@ -967,13 +979,25 @@ function mergeData(local, remote) {
   return out;
 }
 
+let syncBusy = false, dirty = false, retryTimer = null;
+
+function authProblem(status) {
+  if (status === 401 || status === 403) {
+    setSyncStatus("err", "token problem");
+    const st = document.getElementById("s-status");
+    if (st) st.textContent = "✗ GitHub rejected the token. It may have expired — make a new one and re-connect.";
+    return true;
+  }
+  return false;
+}
+
 async function pullRemote() {
   if (!syncCfg.token || !syncCfg.user) return false;
   setSyncStatus("busy", "syncing");
   try {
     const res = await fetch(apiUrl(), { headers: ghHeaders(), cache: "no-store" });
     if (res.status === 404) { remoteSha = null; setSyncStatus("ok", "synced"); return true; }
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (!res.ok) { if (!authProblem(res.status)) throw new Error("HTTP " + res.status); return false; }
     const j = await res.json();
     remoteSha = j.sha;
     const remote = JSON.parse(b64dec(j.content));
@@ -985,6 +1009,7 @@ async function pullRemote() {
     return true;
   } catch (e) {
     setSyncStatus("err", "sync error");
+    scheduleRetry();
     return false;
   }
 }
@@ -1000,19 +1025,39 @@ async function pushRemote(retrying) {
       if (!retrying) { await pullRemote(); return pushRemote(true); }
       throw new Error("conflict");
     }
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (!res.ok) { if (!authProblem(res.status)) throw new Error("HTTP " + res.status); dirty = true; return; }
     const j = await res.json();
     remoteSha = j.content.sha;
+    dirty = false;
     setSyncStatus("ok", "synced");
   } catch (e) {
+    dirty = true;
     setSyncStatus("err", "sync error");
+    scheduleRetry();
   }
 }
 
 function schedulePush() {
   if (!syncCfg.token || !syncCfg.user) return;
+  dirty = true;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => pushRemote(false), 1500);
+  pushTimer = setTimeout(flushPush, 1200);
+}
+
+async function flushPush() {
+  if (!dirty || !syncCfg.token || !syncCfg.user) return;
+  if (syncBusy) { clearTimeout(pushTimer); pushTimer = setTimeout(flushPush, 600); return; }
+  syncBusy = true;
+  try { await pushRemote(false); } finally { syncBusy = false; }
+}
+
+function scheduleRetry() {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (!syncCfg.token || !syncCfg.user) return;
+    pullRemote().then(() => { if (dirty) flushPush(); });
+  }, 30000);
 }
 
 async function connectSync() {
@@ -1040,8 +1085,33 @@ renderAll();
 if (syncCfg.token && syncCfg.user) { pullRemote(); } else { setSyncStatus("off", "local only"); }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && syncCfg.token && syncCfg.user) pullRemote();
+  if (!syncCfg.token || !syncCfg.user) return;
+  if (document.visibilityState === "visible") {
+    pullRemote().then(() => { if (dirty) flushPush(); });
+  } else if (dirty) {
+    clearTimeout(pushTimer);
+    flushPush();
+  }
 });
+
+window.addEventListener("online", () => {
+  if (syncCfg.token && syncCfg.user) pullRemote().then(() => { if (dirty) flushPush(); });
+});
+
+window.addEventListener("pagehide", () => {
+  if (!dirty || !syncCfg.token || !syncCfg.user) return;
+  try {
+    const body = { message: "sync (closing)", content: b64enc(JSON.stringify(data)) };
+    if (remoteSha) body.sha = remoteSha;
+    const s = JSON.stringify(body);
+    if (s.length < 60000) fetch(apiUrl(), { method: "PUT", headers: ghHeaders(), body: s, keepalive: true });
+  } catch (e) {}
+});
+
+document.addEventListener("scroll", () => {
+  const tip = document.getElementById("charttip");
+  if (tip) tip.style.display = "none";
+}, { passive: true });
 
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});

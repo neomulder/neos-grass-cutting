@@ -1,4 +1,4 @@
-const CACHE = "ngc-v2";
+const CACHE = "ngc-v3";
 const ASSETS = ["./", "index.html", "manifest.json", "icon-180.png", "icon-512.png", "logo.png"];
 
 self.addEventListener("install", (e) => {
@@ -21,8 +21,10 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        if (res.ok && e.request.method === "GET") {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
         return res;
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true }))
