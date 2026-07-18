@@ -275,6 +275,39 @@
     <div id="cuthistory"></div>
   </section>
 
+  <!-- ============ DAYS ============ -->
+  <section class="tab" id="tab-days">
+    <div class="filters" style="align-items:stretch">
+      <button class="chipbtn" onclick="shiftDay(-1)">‹</button>
+      <input type="date" id="d-date" onchange="if(this.value){dayView=this.value;renderDays();}"
+        style="flex:1;background:var(--surface);border:1px solid var(--baseline);border-radius:99px;color:var(--ink);font-family:inherit;font-size:14px;font-weight:800;text-align:center;padding:7px 10px;outline:none">
+      <button class="chipbtn" onclick="shiftDay(1)">›</button>
+    </div>
+    <div class="tiles">
+      <div class="tile hero">
+        <div class="k" id="d-netlabel">Net profit</div>
+        <div class="v" id="d-net">$0</div>
+        <div class="sub" id="d-net-sub"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Gross</div>
+        <div class="v" id="d-gross">$0</div>
+        <div class="sub" id="d-gross-sub"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Expenses</div>
+        <div class="v" id="d-exp">$0</div>
+        <div class="sub" id="d-exp-sub"></div>
+      </div>
+    </div>
+    <h2 class="sec">Cut that day</h2>
+    <div id="d-cuts"></div>
+    <h2 class="sec">Expenses that day</h2>
+    <div id="d-exps"></div>
+    <h2 class="sec">Recent days</h2>
+    <div id="d-recent"></div>
+  </section>
+
   <!-- ============ SYNC / SETTINGS ============ -->
   <section class="tab" id="tab-sync">
     <h2 class="sec" style="margin-top:4px">Sync between devices</h2>
@@ -308,6 +341,7 @@
   <button class="on" data-tab="shop"><span class="ic">🏠</span>Shop</button>
   <button data-tab="clients"><span class="ic">👥</span>Clients</button>
   <button data-tab="money"><span class="ic">💵</span>Money</button>
+  <button data-tab="days"><span class="ic">📅</span>Days</button>
   <button data-tab="sync"><span class="ic">⚙️</span>Sync</button>
 </nav>
 
@@ -449,7 +483,82 @@ function clientDueInfo(c) {
 }
 
 /* ================= rendering ================= */
-function renderAll() { renderTiles(); renderChart(); renderBoard(); renderClients(); renderMoney(); }
+function renderAll() { renderTiles(); renderChart(); renderBoard(); renderClients(); renderMoney(); renderDays(); }
+
+/* ================= days tab ================= */
+let dayView = todayStr();
+function shiftDay(n) {
+  const d = parseDay(dayView); d.setDate(d.getDate() + n);
+  dayView = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  renderDays();
+}
+function fmtDayLong(s) {
+  return parseDay(s).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+function renderDays() {
+  document.getElementById("d-date").value = dayView;
+  const cuts = live(data.cuts).filter(x => x.date === dayView);
+  const exps = live(data.expenses).filter(x => x.date === dayView);
+  const gross = cuts.reduce((s, x) => s + (+x.amount || 0), 0);
+  const spent = exps.reduce((s, x) => s + (+x.amount || 0), 0);
+  const net = gross - spent;
+  document.getElementById("d-netlabel").textContent = "Net profit — " + fmtDayLong(dayView);
+  const netEl = document.getElementById("d-net");
+  netEl.textContent = fmtMoney(net);
+  netEl.style.color = net > 0 ? "var(--green)" : (net < 0 ? "var(--red)" : "var(--ink)");
+  const unpaidDay = cuts.filter(x => !x.paid).reduce((s, x) => s + (+x.amount || 0), 0);
+  document.getElementById("d-net-sub").textContent = cuts.length ? (unpaidDay ? fmtMoney(unpaidDay) + " of it still unpaid" : "all collected") : "no cuts logged";
+  document.getElementById("d-gross").textContent = fmtMoney(gross);
+  document.getElementById("d-gross-sub").textContent = cuts.length + " cut" + (cuts.length === 1 ? "" : "s");
+  document.getElementById("d-exp").textContent = fmtMoney(spent);
+  document.getElementById("d-exp-sub").textContent = exps.length ? exps.length + " expense" + (exps.length === 1 ? "" : "s") : "";
+
+  const cEl = document.getElementById("d-cuts");
+  cEl.innerHTML = "";
+  cuts.forEach(x => {
+    const c = data.clients.find(cl => cl.id === x.clientId);
+    const row = document.createElement("div"); row.className = "rowline";
+    row.innerHTML =
+      '<div class="grow"><b>' + esc(c ? c.name : "?") + '</b><div class="sub">' + esc(c && c.address ? c.address : "") + (x.note ? " · " + esc(x.note) : "") + '</div></div>' +
+      '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span>' +
+      '<span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>';
+    row.style.cursor = "pointer";
+    row.addEventListener("click", () => openCutModal(x.clientId, x.id));
+    cEl.appendChild(row);
+  });
+  if (!cuts.length) cEl.innerHTML = '<div class="empty">Nothing cut this day.</div>';
+
+  const eEl = document.getElementById("d-exps");
+  eEl.innerHTML = "";
+  exps.forEach(x => {
+    const row = document.createElement("div"); row.className = "rowline";
+    row.innerHTML =
+      '<div class="grow"><b>' + esc(x.category || "Expense") + '</b><div class="sub">' + (x.note ? esc(x.note) : "") + '</div></div>' +
+      '<span class="amt neg">−' + fmtMoney(+x.amount || 0) + '</span>';
+    row.style.cursor = "pointer";
+    row.addEventListener("click", () => openExpenseModal(x.id));
+    eEl.appendChild(row);
+  });
+  if (!exps.length) eEl.innerHTML = '<div class="empty">No expenses this day.</div>';
+
+  const rEl = document.getElementById("d-recent");
+  rEl.innerHTML = "";
+  const dates = Array.from(new Set(live(data.cuts).map(x => x.date).concat(live(data.expenses).map(x => x.date))))
+    .sort((a, b) => b.localeCompare(a)).slice(0, 14);
+  dates.forEach(dt => {
+    const g = live(data.cuts).filter(x => x.date === dt).reduce((s, x) => s + (+x.amount || 0), 0);
+    const sp = live(data.expenses).filter(x => x.date === dt).reduce((s, x) => s + (+x.amount || 0), 0);
+    const n = live(data.cuts).filter(x => x.date === dt).length;
+    const row = document.createElement("div"); row.className = "rowline";
+    row.innerHTML =
+      '<div class="grow"><b>' + fmtDayLong(dt) + '</b><div class="sub">' + n + ' cut' + (n === 1 ? '' : 's') + ' · ' + fmtMoney(g) + ' gross</div></div>' +
+      '<span class="amt ' + ((g - sp) >= 0 ? 'pos' : 'neg') + '">' + fmtMoney(g - sp) + ' net</span>';
+    row.style.cursor = "pointer";
+    row.addEventListener("click", () => { dayView = dt; renderDays(); window.scrollTo(0, 0); });
+    rEl.appendChild(row);
+  });
+  if (!dates.length) rEl.innerHTML = '<div class="empty">No activity yet.</div>';
+}
 
 function renderTiles() {
   const t = todayStr();
