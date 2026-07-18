@@ -1,5 +1,5 @@
-const CACHE = "ngc-v1";
-const ASSETS = ["./", "index.html", "manifest.json", "icon-180.png", "icon-512.png"];
+const CACHE = "ngc-v2";
+const ASSETS = ["./", "index.html", "manifest.json", "icon-180.png", "icon-512.png", "logo.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));

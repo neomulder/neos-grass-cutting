@@ -42,10 +42,10 @@
     border-bottom: 1px solid var(--hairline);
     background: var(--page);
   }
-  .brand {
-    font-size: 22px; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase;
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand img {
+    height: 52px; width: auto; background: #fff; border-radius: 10px; padding: 3px 8px; display: block;
   }
-  .brand .green { color: var(--green); }
   .tagline { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
   .syncdot { float: right; margin-top: 6px; font-size: 11px; font-weight: 700; color: var(--muted); }
   .syncdot::before { content: "●"; margin-right: 5px; }
@@ -83,7 +83,7 @@
   .bars { display: flex; align-items: flex-end; gap: 8px; height: 96px; border-bottom: 2px solid var(--baseline); }
   .barcol { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; cursor: default; }
   .barcol .bar { width: 100%; max-width: 44px; background: var(--green-deep); border-radius: 4px 4px 0 0; min-height: 2px; }
-  .barcol .blabel { position: absolute; top: -2px; transform: translateY(-100%); font-size: 10px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+  .barcol .blabel { position: absolute; font-size: 10px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
   .barxs { display: flex; gap: 8px; margin-top: 6px; }
   .barxs span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .charttip {
@@ -199,8 +199,8 @@
 
 <header class="app">
   <span class="syncdot off" id="syncdot">local</span>
-  <div class="brand">NEO'S <span class="green">GRASS CUTTING</span></div>
-  <div class="tagline">Get shit done. Make money.</div>
+  <div class="brand"><img src="logo.png" alt="Neo's Grass Cutting"></div>
+  <div class="tagline" style="margin-top:6px">Get shit done. Make money.</div>
 </header>
 
 <main>
@@ -485,9 +485,11 @@ function renderChart() {
   weeks.forEach((w, i) => {
     const col = document.createElement("div"); col.className = "barcol";
     const bar = document.createElement("div"); bar.className = "bar";
-    bar.style.height = Math.max(2, Math.round(w.total / max * 92)) + "px";
+    const h = Math.max(2, Math.round(w.total / max * 92));
+    bar.style.height = h + "px";
     if (i === weeks.length - 1 && w.total > 0) {
       const lb = document.createElement("div"); lb.className = "blabel"; lb.textContent = fmtMoney(w.total);
+      lb.style.bottom = (h + 4) + "px";
       col.appendChild(lb);
     }
     col.appendChild(bar);
@@ -867,6 +869,7 @@ async function pullRemote() {
     persistLocal();
     renderAll();
     setSyncStatus("ok", "synced");
+    if (JSON.stringify(data) !== JSON.stringify(remote)) schedulePush();
     return true;
   } catch (e) {
     setSyncStatus("err", "sync error");
