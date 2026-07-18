@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Neo's Grass Cutting</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Neo's Grass">
+<meta name="theme-color" content="#0d0d0d">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --hairline: #2c2c2a;
+    --baseline: #383835;
+    --green: #0ca30c;
+    --green-deep: #008300;
+    --amber: #fab219;
+    --red: #d03b3b;
+    --blue: #3987e5;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+  header.app {
+    padding: calc(14px + env(safe-area-inset-top)) 16px 10px;
+    border-bottom: 1px solid var(--hairline);
+    background: var(--page);
+  }
+  .brand {
+    font-size: 22px; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .brand .green { color: var(--green); }
+  .tagline { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+  .syncdot { float: right; margin-top: 6px; font-size: 11px; font-weight: 700; color: var(--muted); }
+  .syncdot::before { content: "●"; margin-right: 5px; }
+  .syncdot.ok::before { color: var(--green); }
+  .syncdot.err::before { color: var(--red); }
+  .syncdot.busy::before { color: var(--amber); }
+  .syncdot.off::before { color: var(--baseline); }
+
+  main { padding: 14px 14px 24px; max-width: 760px; margin: 0 auto; }
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+
+  /* ---- tiles ---- */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius);
+    padding: 14px 14px 12px;
+  }
+  .tile.hero { grid-column: 1 / -1; }
+  .tile .k { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .tile .v { font-size: 26px; font-weight: 800; margin-top: 4px; }
+  .tile.hero .v { font-size: 42px; color: var(--green); }
+  .tile .sub { font-size: 12px; color: var(--ink-2); margin-top: 3px; }
+  .tile .v.amber { color: var(--amber); }
+
+  h2.sec {
+    font-size: 13px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-2); margin: 22px 0 10px;
+  }
+  h2.sec small { color: var(--muted); font-weight: 700; letter-spacing: 0.06em; text-transform: none; float: right; }
+
+  /* ---- chart ---- */
+  .chartbox { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 14px; margin-top: 10px; position: relative; }
+  .chartbox .k { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .bars { display: flex; align-items: flex-end; gap: 8px; height: 96px; border-bottom: 2px solid var(--baseline); }
+  .barcol { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; cursor: default; }
+  .barcol .bar { width: 100%; max-width: 44px; background: var(--green-deep); border-radius: 4px 4px 0 0; min-height: 2px; }
+  .barcol .blabel { position: absolute; top: -2px; transform: translateY(-100%); font-size: 10px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+  .barxs { display: flex; gap: 8px; margin-top: 6px; }
+  .barxs span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .charttip {
+    position: absolute; pointer-events: none; background: var(--surface-2); border: 1px solid var(--baseline);
+    border-radius: 8px; padding: 6px 9px; font-size: 12px; display: none; z-index: 5; white-space: nowrap;
+  }
+  .charttip b { color: var(--green); }
+
+  /* ---- board / lists ---- */
+  .filters { display: flex; gap: 8px; margin-bottom: 10px; }
+  .chipbtn {
+    border: 1px solid var(--baseline); background: var(--surface); color: var(--ink-2);
+    font-size: 12px; font-weight: 800; letter-spacing: 0.06em; padding: 7px 14px; border-radius: 99px; cursor: pointer;
+  }
+  .chipbtn.on { background: var(--ink); color: var(--page); border-color: var(--ink); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius);
+    padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px;
+  }
+  .card .grow { flex: 1; min-width: 0; }
+  .card .name { font-size: 16px; font-weight: 800; }
+  .card .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card .meta a { color: var(--blue); text-decoration: none; }
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 900; letter-spacing: 0.08em;
+    padding: 2px 7px; border-radius: 5px; border: 1px solid var(--baseline); color: var(--ink-2); margin-right: 5px;
+  }
+  .badge.A { border-color: var(--blue); color: var(--blue); }
+  .badge.B { border-color: var(--amber); color: var(--amber); }
+  .status { font-size: 11px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 5px; }
+  .status.overdue { color: var(--red); }
+  .status.due { color: var(--green); }
+  .status.okcut { color: var(--blue); }
+  .status.wait { color: var(--muted); }
+
+  .btn {
+    border: none; border-radius: 10px; font-weight: 900; font-size: 13px; letter-spacing: 0.04em;
+    padding: 10px 14px; cursor: pointer; text-transform: uppercase;
+  }
+  .btn.cut { background: var(--green); color: #04220a; }
+  .btn.ghost { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--baseline); }
+  .btn.pay { background: var(--surface-2); color: var(--green); border: 1px solid var(--green-deep); }
+  .btn.big { width: 100%; padding: 14px; font-size: 15px; margin-top: 8px; }
+  .btn.primary { background: var(--green); color: #04220a; }
+  .btn.danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
+
+  .rowline {
+    display: flex; align-items: center; gap: 10px; padding: 11px 2px;
+    border-bottom: 1px solid var(--hairline); font-size: 14px;
+  }
+  .rowline .grow { flex: 1; min-width: 0; }
+  .rowline .amt { font-weight: 800; font-variant-numeric: tabular-nums; }
+  .rowline .amt.pos { color: var(--green); }
+  .rowline .amt.neg { color: var(--red); }
+  .rowline .sub { font-size: 12px; color: var(--muted); }
+  .paidtag { font-size: 10px; font-weight: 900; letter-spacing: 0.08em; }
+  .paidtag.paid { color: var(--green); }
+  .paidtag.unpaid { color: var(--amber); }
+  .empty { color: var(--muted); font-size: 14px; padding: 18px 4px; text-align: center; }
+
+  /* ---- nav ---- */
+  nav {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+    display: flex; background: rgba(13,13,13,0.96); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--hairline); padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button {
+    flex: 1; background: none; border: none; color: var(--muted); font-family: inherit;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 9px 0 10px; cursor: pointer;
+  }
+  nav button .ic { display: block; font-size: 20px; margin-bottom: 2px; }
+  nav button.on { color: var(--green); }
+
+  /* ---- modal & forms ---- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 50;
+    display: none; align-items: flex-end; justify-content: center;
+  }
+  .overlay.open { display: flex; }
+  .sheet {
+    background: var(--surface); border: 1px solid var(--baseline); border-bottom: none;
+    border-radius: 18px 18px 0 0; width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
+    padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
+  }
+  .sheet h3 { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+  .field input, .field select, .field textarea {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--baseline); border-radius: 10px;
+    color: var(--ink); font-family: inherit; font-size: 16px; padding: 11px 12px; outline: none;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--green-deep); }
+  .field2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .segrow { display: flex; gap: 8px; }
+  .segrow button {
+    flex: 1; background: var(--surface-2); border: 1px solid var(--baseline); color: var(--ink-2);
+    border-radius: 10px; font-family: inherit; font-weight: 800; font-size: 14px; padding: 11px 0; cursor: pointer;
+  }
+  .segrow button.on { background: var(--ink); color: var(--page); border-color: var(--ink); }
+  .segrow button.on.paidon { background: var(--green); color: #04220a; border-color: var(--green); }
+  .sheet .actions { display: flex; gap: 10px; margin-top: 16px; }
+  .sheet .actions .btn { flex: 1; padding: 13px; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .note a { color: var(--blue); }
+  .money-total { font-size: 13px; font-weight: 800; color: var(--ink-2); }
+  .fab-row { margin-top: 4px; }
+  code.mini { background: var(--surface-2); border: 1px solid var(--hairline); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <span class="syncdot off" id="syncdot">local</span>
+  <div class="brand">NEO'S <span class="green">GRASS CUTTING</span></div>
+  <div class="tagline">Get shit done. Make money.</div>
+</header>
+
+<main>
+
+  <!-- ============ SHOP (dashboard) ============ -->
+  <section class="tab active" id="tab-shop">
+    <div class="tiles">
+      <div class="tile hero">
+        <div class="k">Cash earned this month</div>
+        <div class="v" id="t-month">$0</div>
+        <div class="sub" id="t-month-sub"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Unpaid</div>
+        <div class="v amber" id="t-unpaid">$0</div>
+        <div class="sub" id="t-unpaid-sub"></div>
+      </div>
+      <div class="tile">
+        <div class="k">This year</div>
+        <div class="v" id="t-year">$0</div>
+        <div class="sub" id="t-year-sub"></div>
+      </div>
+    </div>
+
+    <div class="chartbox">
+      <div class="k">Earned per week — last 8 weeks</div>
+      <div class="bars" id="bars"></div>
+      <div class="barxs" id="barxs"></div>
+      <div class="charttip" id="charttip"></div>
+    </div>
+
+    <h2 class="sec">The board <small id="board-count"></small></h2>
+    <div class="filters" id="board-filters">
+      <button class="chipbtn on" data-g="ALL">All</button>
+      <button class="chipbtn" data-g="A">A group</button>
+      <button class="chipbtn" data-g="B">B group</button>
+    </div>
+    <div id="board"></div>
+  </section>
+
+  <!-- ============ CLIENTS ============ -->
+  <section class="tab" id="tab-clients">
+    <button class="btn primary big" onclick="openClientModal()">+ New client</button>
+    <h2 class="sec">Clients <small id="client-count"></small></h2>
+    <div id="clientlist"></div>
+  </section>
+
+  <!-- ============ MONEY ============ -->
+  <section class="tab" id="tab-money">
+    <div class="tiles">
+      <div class="tile">
+        <div class="k">Profit this month</div>
+        <div class="v" id="m-profit">$0</div>
+        <div class="sub" id="m-profit-sub"></div>
+      </div>
+      <div class="tile">
+        <div class="k">Expenses this month</div>
+        <div class="v" id="m-exp">$0</div>
+        <div class="sub" id="m-exp-sub"></div>
+      </div>
+    </div>
+
+    <h2 class="sec">Waiting on payment <small id="unpaid-total"></small></h2>
+    <div id="unpaidlist"></div>
+
+    <h2 class="sec">Expenses</h2>
+    <button class="btn ghost big" onclick="openExpenseModal()">+ Add expense</button>
+    <div id="expenselist"></div>
+
+    <h2 class="sec">Cut history</h2>
+    <div id="cuthistory"></div>
+  </section>
+
+  <!-- ============ SYNC / SETTINGS ============ -->
+  <section class="tab" id="tab-sync">
+    <h2 class="sec" style="margin-top:4px">Sync between devices</h2>
+    <p class="note" style="margin-bottom:12px">
+      Your data lives in your own private GitHub repo. Enter the same details on your
+      iPhone and MacBook and they stay in sync automatically.
+    </p>
+    <div class="field"><label>GitHub username</label><input id="s-user" autocapitalize="none" autocorrect="off" placeholder="yourname"></div>
+    <div class="field"><label>Data repo name</label><input id="s-repo" autocapitalize="none" autocorrect="off" placeholder="grass-data"></div>
+    <div class="field"><label>Access token</label><input id="s-token" type="password" autocapitalize="none" placeholder="github_pat_..."></div>
+    <button class="btn primary big" onclick="connectSync()">Connect &amp; sync</button>
+    <p class="note" style="margin-top:10px" id="s-status"></p>
+
+    <h2 class="sec">Backup</h2>
+    <div class="segrow">
+      <button onclick="exportData()">Export file</button>
+      <button onclick="document.getElementById('importfile').click()">Import file</button>
+    </div>
+    <input type="file" id="importfile" accept=".json" style="display:none" onchange="importData(event)">
+
+    <h2 class="sec">Install as an app</h2>
+    <p class="note">
+      <b>iPhone:</b> open this page in Safari once → Share button → <b>Add to Home Screen</b>. It gets its own icon and opens fullscreen like a real app.<br><br>
+      <b>Mac:</b> open in Safari → File menu → <b>Add to Dock</b>.
+    </p>
+  </section>
+
+</main>
+
+<nav>
+  <button class="on" data-tab="shop"><span class="ic">🏠</span>Shop</button>
+  <button data-tab="clients"><span class="ic">👥</span>Clients</button>
+  <button data-tab="money"><span class="ic">💵</span>Money</button>
+  <button data-tab="sync"><span class="ic">⚙️</span>Sync</button>
+</nav>
+
+<!-- ============ CUT MODAL ============ -->
+<div class="overlay" id="cut-overlay" onclick="if(event.target===this)closeSheet('cut-overlay')">
+  <div class="sheet">
+    <h3 id="cut-title">Log a cut</h3>
+    <div class="field2">
+      <div class="field"><label>Date</label><input type="date" id="c-date"></div>
+      <div class="field"><label>Amount $</label><input type="number" id="c-amount" inputmode="decimal" step="0.01"></div>
+    </div>
+    <div class="field"><label>Paid?</label>
+      <div class="segrow">
+        <button id="c-paid-yes" onclick="setCutPaid(true)">Paid ✓</button>
+        <button id="c-paid-no" onclick="setCutPaid(false)">Not yet</button>
+      </div>
+    </div>
+    <div class="field"><label>Note (optional)</label><input id="c-note" placeholder="edged, bagged, gate was locked..."></div>
+    <div class="actions">
+      <button class="btn danger" id="c-delete" onclick="deleteCut()" style="display:none">Delete</button>
+      <button class="btn ghost" onclick="closeSheet('cut-overlay')">Cancel</button>
+      <button class="btn primary" onclick="saveCut()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ CLIENT MODAL ============ -->
+<div class="overlay" id="client-overlay" onclick="if(event.target===this)closeSheet('client-overlay')">
+  <div class="sheet">
+    <h3 id="cl-title">New client</h3>
+    <div class="field"><label>Name</label><input id="cl-name" placeholder="Mrs. Johnson"></div>
+    <div class="field"><label>Address</label><input id="cl-address" placeholder="123 Maple St"></div>
+    <div class="field"><label>Phone (optional)</label><input id="cl-phone" type="tel" inputmode="tel"></div>
+    <div class="field2">
+      <div class="field"><label>Group</label>
+        <div class="segrow">
+          <button id="cl-gA" onclick="setClGroup('A')">A</button>
+          <button id="cl-gB" onclick="setClGroup('B')">B</button>
+        </div>
+      </div>
+      <div class="field"><label>Schedule</label>
+        <div class="segrow">
+          <button id="cl-f7" onclick="setClFreq(7)">Weekly</button>
+          <button id="cl-f14" onclick="setClFreq(14)">Bi-weekly</button>
+        </div>
+      </div>
+    </div>
+    <div class="field"><label>Price per cut $</label><input id="cl-price" type="number" inputmode="decimal" step="0.01"></div>
+    <div class="field"><label>Notes (optional)</label><input id="cl-notes" placeholder="dog in yard, pay via check..."></div>
+    <div class="actions">
+      <button class="btn danger" id="cl-delete" onclick="deleteClient()" style="display:none">Delete</button>
+      <button class="btn ghost" onclick="closeSheet('client-overlay')">Cancel</button>
+      <button class="btn primary" onclick="saveClient()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ EXPENSE MODAL ============ -->
+<div class="overlay" id="exp-overlay" onclick="if(event.target===this)closeSheet('exp-overlay')">
+  <div class="sheet">
+    <h3 id="ex-title">Add expense</h3>
+    <div class="field2">
+      <div class="field"><label>Date</label><input type="date" id="ex-date"></div>
+      <div class="field"><label>Amount $</label><input type="number" id="ex-amount" inputmode="decimal" step="0.01"></div>
+    </div>
+    <div class="field"><label>What for</label>
+      <select id="ex-cat">
+        <option>Gas</option><option>Equipment</option><option>Repairs</option>
+        <option>Trimmer line / blades</option><option>Insurance</option><option>Other</option>
+      </select>
+    </div>
+    <div class="field"><label>Note (optional)</label><input id="ex-note"></div>
+    <div class="actions">
+      <button class="btn danger" id="ex-delete" onclick="deleteExpense()" style="display:none">Delete</button>
+      <button class="btn ghost" onclick="closeSheet('exp-overlay')">Cancel</button>
+      <button class="btn primary" onclick="saveExpense()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ================= state ================= */
+const LS_DATA = "ngc-data-v1";
+const LS_SYNC = "ngc-sync-v1";
+const MIN_GAP_DAYS = 6;
+
+let data = loadLocal();
+let syncCfg = JSON.parse(localStorage.getItem(LS_SYNC) || "null") || { user: "", repo: "grass-data", token: "" };
+let remoteSha = null;
+let pushTimer = null;
+let boardFilter = "ALL";
+
+function loadLocal() {
+  const raw = localStorage.getItem(LS_DATA);
+  if (raw) { try { return JSON.parse(raw); } catch (e) {} }
+  return { clients: [], cuts: [], expenses: [] };
+}
+function persistLocal() { localStorage.setItem(LS_DATA, JSON.stringify(data)); }
+
+function touch(rec) { rec.updatedAt = new Date().toISOString(); return rec; }
+function uid() { return (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random()); }
+function live(arr) { return arr.filter(r => !r.deleted); }
+
+function changed() {
+  persistLocal();
+  renderAll();
+  schedulePush();
+}
+
+/* ================= dates & money ================= */
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function parseDay(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
+function daysBetween(a, b) { return Math.round((parseDay(b) - parseDay(a)) / 86400000); }
+function fmtMoney(n) {
+  const v = Math.round(n * 100) / 100;
+  return "$" + v.toLocaleString("en-US", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+}
+function fmtDayShort(s) { const d = parseDay(s); return (d.getMonth() + 1) + "/" + d.getDate(); }
+function sameMonth(s, ref) { return s.slice(0, 7) === ref.slice(0, 7); }
+function sameYear(s, ref) { return s.slice(0, 4) === ref.slice(0, 4); }
+
+/* ================= due logic ================= */
+function clientDueInfo(c) {
+  const cuts = live(data.cuts).filter(x => x.clientId === c.id).sort((a, b) => b.date.localeCompare(a.date));
+  const last = cuts[0] || null;
+  if (!last) return { state: "new", label: "NEW — cut anytime", days: null, sort: 900 };
+  const days = daysBetween(last.date, todayStr());
+  const freq = c.freq || 7;
+  if (days > freq) return { state: "overdue", label: "OVERDUE — " + days + " days since cut", days, sort: 1000 + days };
+  if (days === freq) return { state: "due", label: "DUE TODAY — " + days + " days since cut", days, sort: 950 };
+  if (days >= MIN_GAP_DAYS) return { state: "okcut", label: "OK TO CUT — " + days + " days since cut", days, sort: 800 + days };
+  return { state: "wait", label: "WAIT " + (MIN_GAP_DAYS - days) + " MORE DAY" + (MIN_GAP_DAYS - days > 1 ? "S" : "") + " — cut " + days + "d ago", days, sort: days };
+}
+
+/* ================= rendering ================= */
+function renderAll() { renderTiles(); renderChart(); renderBoard(); renderClients(); renderMoney(); }
+
+function renderTiles() {
+  const t = todayStr();
+  const cuts = live(data.cuts);
+  const monthEarned = cuts.filter(x => sameMonth(x.date, t)).reduce((s, x) => s + (+x.amount || 0), 0);
+  const yearEarned = cuts.filter(x => sameYear(x.date, t)).reduce((s, x) => s + (+x.amount || 0), 0);
+  const unpaid = cuts.filter(x => !x.paid);
+  const unpaidTotal = unpaid.reduce((s, x) => s + (+x.amount || 0), 0);
+  const monthCuts = cuts.filter(x => sameMonth(x.date, t)).length;
+
+  document.getElementById("t-month").textContent = fmtMoney(monthEarned);
+  document.getElementById("t-month-sub").textContent = monthCuts + " cut" + (monthCuts === 1 ? "" : "s") + " this month";
+  document.getElementById("t-unpaid").textContent = fmtMoney(unpaidTotal);
+  document.getElementById("t-unpaid-sub").textContent = unpaid.length + " job" + (unpaid.length === 1 ? "" : "s") + " waiting";
+  document.getElementById("t-year").textContent = fmtMoney(yearEarned);
+  document.getElementById("t-year-sub").textContent = cuts.filter(x => sameYear(x.date, t)).length + " cuts total";
+}
+
+function weekStart(d) { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); x.setHours(0,0,0,0); return x; }
+function renderChart() {
+  const cuts = live(data.cuts);
+  const w0 = weekStart(new Date());
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const start = new Date(w0); start.setDate(start.getDate() - i * 7);
+    const end = new Date(start); end.setDate(end.getDate() + 7);
+    const total = cuts.reduce((s, x) => { const d = parseDay(x.date); return (d >= start && d < end) ? s + (+x.amount || 0) : s; }, 0);
+    weeks.push({ start, total });
+  }
+  const max = Math.max(...weeks.map(w => w.total), 1);
+  const barsEl = document.getElementById("bars");
+  const xsEl = document.getElementById("barxs");
+  barsEl.innerHTML = ""; xsEl.innerHTML = "";
+  const tip = document.getElementById("charttip");
+  weeks.forEach((w, i) => {
+    const col = document.createElement("div"); col.className = "barcol";
+    const bar = document.createElement("div"); bar.className = "bar";
+    bar.style.height = Math.max(2, Math.round(w.total / max * 92)) + "px";
+    if (i === weeks.length - 1 && w.total > 0) {
+      const lb = document.createElement("div"); lb.className = "blabel"; lb.textContent = fmtMoney(w.total);
+      col.appendChild(lb);
+    }
+    col.appendChild(bar);
+    const label = (w.start.getMonth() + 1) + "/" + w.start.getDate();
+    col.addEventListener("pointerenter", (ev) => {
+      tip.innerHTML = "wk of " + label + " · <b>" + fmtMoney(w.total) + "</b>";
+      tip.style.display = "block";
+      const box = barsEl.parentElement.getBoundingClientRect();
+      const r = col.getBoundingClientRect();
+      let x = r.left - box.left + r.width / 2 - 50;
+      x = Math.max(4, Math.min(x, box.width - 110));
+      tip.style.left = x + "px"; tip.style.top = "26px";
+    });
+    col.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+    barsEl.appendChild(col);
+    const xs = document.createElement("span"); xs.textContent = label; xsEl.appendChild(xs);
+  });
+}
+
+function renderBoard() {
+  const el = document.getElementById("board");
+  el.innerHTML = "";
+  let clients = live(data.clients).filter(c => c.active !== false);
+  if (boardFilter !== "ALL") clients = clients.filter(c => c.group === boardFilter);
+  const rows = clients.map(c => ({ c, info: clientDueInfo(c) })).sort((a, b) => b.info.sort - a.info.sort);
+  const ready = rows.filter(r => r.info.state === "overdue" || r.info.state === "due" || r.info.state === "okcut" || r.info.state === "new").length;
+  document.getElementById("board-count").textContent = ready + " ready to cut";
+  if (!rows.length) { el.innerHTML = '<div class="empty">No clients yet — add them in the Clients tab.</div>'; return; }
+  rows.forEach(({ c, info }) => {
+    const card = document.createElement("div"); card.className = "card";
+    card.innerHTML =
+      '<div class="grow">' +
+        '<div class="name">' + esc(c.name) + '</div>' +
+        '<div class="meta"><span class="badge ' + c.group + '">' + c.group + '</span>' +
+          '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' +
+          fmtMoney(+c.price || 0) + '</div>' +
+        '<div class="status ' + info.state + '">' + info.label + '</div>' +
+      '</div>' +
+      '<button class="btn cut">Cut ✓</button>';
+    card.querySelector(".btn.cut").addEventListener("click", () => openCutModal(c.id));
+    el.appendChild(card);
+  });
+}
+
+function renderClients() {
+  const el = document.getElementById("clientlist");
+  el.innerHTML = "";
+  const clients = live(data.clients).sort((a, b) => (a.group + a.name).localeCompare(b.group + b.name));
+  document.getElementById("client-count").textContent = clients.length + " total";
+  if (!clients.length) { el.innerHTML = '<div class="empty">No clients yet. Hit that green button.</div>'; return; }
+  clients.forEach(c => {
+    const cuts = live(data.cuts).filter(x => x.clientId === c.id);
+    const lastCut = cuts.sort((a, b) => b.date.localeCompare(a.date))[0];
+    const card = document.createElement("div"); card.className = "card";
+    const mapsUrl = "https://maps.apple.com/?q=" + encodeURIComponent(c.address || "");
+    card.innerHTML =
+      '<div class="grow">' +
+        '<div class="name">' + esc(c.name) + (c.active === false ? ' <span class="badge">INACTIVE</span>' : '') + '</div>' +
+        '<div class="meta"><span class="badge ' + c.group + '">' + c.group + '</span>' +
+          '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' + fmtMoney(+c.price || 0) + '</div>' +
+        '<div class="meta">' + (c.address ? '<a href="' + mapsUrl + '">' + esc(c.address) + '</a>' : '') +
+          (c.phone ? ' · <a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : '') + '</div>' +
+        '<div class="meta">' + (lastCut ? "Last cut " + fmtDayShort(lastCut.date) + " · " + cuts.length + " cuts all-time" : "Never cut yet") +
+          (c.notes ? " · " + esc(c.notes) : "") + '</div>' +
+      '</div>' +
+      '<button class="btn ghost">Edit</button>';
+    card.querySelector(".btn.ghost").addEventListener("click", () => openClientModal(c.id));
+    el.appendChild(card);
+  });
+}
+
+function renderMoney() {
+  const t = todayStr();
+  const cuts = live(data.cuts);
+  const exps = live(data.expenses);
+  const monthEarned = cuts.filter(x => sameMonth(x.date, t)).reduce((s, x) => s + (+x.amount || 0), 0);
+  const monthExp = exps.filter(x => sameMonth(x.date, t)).reduce((s, x) => s + (+x.amount || 0), 0);
+  const profitEl = document.getElementById("m-profit");
+  profitEl.textContent = fmtMoney(monthEarned - monthExp);
+  profitEl.style.color = (monthEarned - monthExp) >= 0 ? "var(--green)" : "var(--red)";
+  document.getElementById("m-profit-sub").textContent = fmtMoney(monthEarned) + " in − " + fmtMoney(monthExp) + " out";
+  document.getElementById("m-exp").textContent = fmtMoney(monthExp);
+  const yearExp = exps.filter(x => sameYear(x.date, t)).reduce((s, x) => s + (+x.amount || 0), 0);
+  document.getElementById("m-exp-sub").textContent = fmtMoney(yearExp) + " this year";
+
+  /* unpaid */
+  const unpaidEl = document.getElementById("unpaidlist");
+  unpaidEl.innerHTML = "";
+  const unpaid = cuts.filter(x => !x.paid).sort((a, b) => a.date.localeCompare(b.date));
+  document.getElementById("unpaid-total").textContent = fmtMoney(unpaid.reduce((s, x) => s + (+x.amount || 0), 0)) + " owed";
+  if (!unpaid.length) unpaidEl.innerHTML = '<div class="empty">Nobody owes you. 💪</div>';
+  unpaid.forEach(x => {
+    const c = data.clients.find(cl => cl.id === x.clientId);
+    const row = document.createElement("div"); row.className = "rowline";
+    row.innerHTML =
+      '<div class="grow"><b>' + esc(c ? c.name : "?") + '</b><div class="sub">' + fmtDayShort(x.date) + (x.note ? " · " + esc(x.note) : "") + '</div></div>' +
+      '<span class="amt">' + fmtMoney(+x.amount || 0) + '</span>' +
+      '<button class="btn pay">Paid ✓</button>';
+    row.querySelector(".btn.pay").addEventListener("click", () => {
+      x.paid = true; touch(x); changed();
+    });
+    unpaidEl.appendChild(row);
+  });
+
+  /* expenses */
+  const expEl = document.getElementById("expenselist");
+  expEl.innerHTML = "";
+  exps.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30).forEach(x => {
+    const row = document.createElement("div"); row.className = "rowline";
+    row.innerHTML =
+      '<div class="grow"><b>' + esc(x.category || "Expense") + '</b><div class="sub">' + fmtDayShort(x.date) + (x.note ? " · " + esc(x.note) : "") + '</div></div>' +
+      '<span class="amt neg">−' + fmtMoney(+x.amount || 0) + '</span>';
+    row.style.cursor = "pointer";
+    row.addEventListener("click", () => openExpenseModal(x.id));
+    expEl.appendChild(row);
+  });
+  if (!exps.length) expEl.innerHTML = '<div class="empty">No expenses logged.</div>';
+
+  /* history */
+  const histEl = document.getElementById("cuthistory");
+  histEl.innerHTML = "";
+  cuts.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 40).forEach(x => {
+    const c = data.clients.find(cl => cl.id === x.clientId);
+    const row = document.createElement("div"); row.className = "rowline";
+    row.innerHTML =
+      '<div class="grow"><b>' + esc(c ? c.name : "?") + '</b><div class="sub">' + fmtDayShort(x.date) + '</div></div>' +
+      '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span>' +
+      '<span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>';
+    row.style.cursor = "pointer";
+    row.addEventListener("click", () => openCutModal(x.clientId, x.id));
+    histEl.appendChild(row);
+  });
+  if (!cuts.length) histEl.innerHTML = '<div class="empty">No cuts logged yet.</div>';
+}
+
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+/* ================= tabs & filters ================= */
+document.querySelectorAll("nav button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    document.querySelectorAll("section.tab").forEach(s => s.classList.remove("active"));
+    document.getElementById("tab-" + b.dataset.tab).classList.add("active");
+    window.scrollTo(0, 0);
+  });
+});
+document.querySelectorAll("#board-filters .chipbtn").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#board-filters .chipbtn").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    boardFilter = b.dataset.g;
+    renderBoard();
+  });
+});
+
+function closeSheet(id) { document.getElementById(id).classList.remove("open"); }
+
+/* ================= cut modal ================= */
+let cutCtx = { clientId: null, cutId: null, paid: true };
+function openCutModal(clientId, cutId) {
+  const c = data.clients.find(x => x.id === clientId);
+  cutCtx = { clientId, cutId: cutId || null, paid: true };
+  document.getElementById("cut-title").textContent = (cutId ? "Edit cut — " : "Log cut — ") + (c ? c.name : "");
+  if (cutId) {
+    const x = data.cuts.find(k => k.id === cutId);
+    document.getElementById("c-date").value = x.date;
+    document.getElementById("c-amount").value = x.amount;
+    document.getElementById("c-note").value = x.note || "";
+    cutCtx.paid = !!x.paid;
+    document.getElementById("c-delete").style.display = "";
+  } else {
+    document.getElementById("c-date").value = todayStr();
+    document.getElementById("c-amount").value = c && c.price ? c.price : "";
+    document.getElementById("c-note").value = "";
+    document.getElementById("c-delete").style.display = "none";
+  }
+  setCutPaid(cutCtx.paid);
+  document.getElementById("cut-overlay").classList.add("open");
+}
+function setCutPaid(v) {
+  cutCtx.paid = v;
+  document.getElementById("c-paid-yes").className = v ? "on paidon" : "";
+  document.getElementById("c-paid-no").className = v ? "" : "on";
+}
+function saveCut() {
+  const date = document.getElementById("c-date").value;
+  const amount = parseFloat(document.getElementById("c-amount").value);
+  if (!date || isNaN(amount)) { alert("Need a date and an amount."); return; }
+  const note = document.getElementById("c-note").value.trim();
+  if (cutCtx.cutId) {
+    const x = data.cuts.find(k => k.id === cutCtx.cutId);
+    Object.assign(x, { date, amount, paid: cutCtx.paid, note });
+    touch(x);
+  } else {
+    data.cuts.push(touch({ id: uid(), clientId: cutCtx.clientId, date, amount, paid: cutCtx.paid, note }));
+  }
+  closeSheet("cut-overlay");
+  changed();
+}
+function deleteCut() {
+  if (!confirm("Delete this cut?")) return;
+  const x = data.cuts.find(k => k.id === cutCtx.cutId);
+  x.deleted = true; touch(x);
+  closeSheet("cut-overlay");
+  changed();
+}
+
+/* ================= client modal ================= */
+let clCtx = { id: null, group: "A", freq: 7 };
+function openClientModal(id) {
+  clCtx = { id: id || null, group: "A", freq: 7 };
+  if (id) {
+    const c = data.clients.find(x => x.id === id);
+    document.getElementById("cl-title").textContent = "Edit client";
+    document.getElementById("cl-name").value = c.name;
+    document.getElementById("cl-address").value = c.address || "";
+    document.getElementById("cl-phone").value = c.phone || "";
+    document.getElementById("cl-price").value = c.price || "";
+    document.getElementById("cl-notes").value = c.notes || "";
+    clCtx.group = c.group; clCtx.freq = c.freq;
+    document.getElementById("cl-delete").style.display = "";
+  } else {
+    document.getElementById("cl-title").textContent = "New client";
+    ["cl-name","cl-address","cl-phone","cl-price","cl-notes"].forEach(i => document.getElementById(i).value = "");
+    document.getElementById("cl-delete").style.display = "none";
+  }
+  setClGroup(clCtx.group); setClFreq(clCtx.freq);
+  document.getElementById("client-overlay").classList.add("open");
+}
+function setClGroup(g) {
+  clCtx.group = g;
+  document.getElementById("cl-gA").className = g === "A" ? "on" : "";
+  document.getElementById("cl-gB").className = g === "B" ? "on" : "";
+}
+function setClFreq(f) {
+  clCtx.freq = f;
+  document.getElementById("cl-f7").className = f === 7 ? "on" : "";
+  document.getElementById("cl-f14").className = f === 14 ? "on" : "";
+}
+function saveClient() {
+  const name = document.getElementById("cl-name").value.trim();
+  if (!name) { alert("Client needs a name."); return; }
+  const rec = {
+    name,
+    address: document.getElementById("cl-address").value.trim(),
+    phone: document.getElementById("cl-phone").value.trim(),
+    price: parseFloat(document.getElementById("cl-price").value) || 0,
+    notes: document.getElementById("cl-notes").value.trim(),
+    group: clCtx.group, freq: clCtx.freq, active: true
+  };
+  if (clCtx.id) {
+    const c = data.clients.find(x => x.id === clCtx.id);
+    Object.assign(c, rec); touch(c);
+  } else {
+    data.clients.push(touch(Object.assign({ id: uid() }, rec)));
+  }
+  closeSheet("client-overlay");
+  changed();
+}
+function deleteClient() {
+  if (!confirm("Delete this client? Their cut history stays in Money.")) return;
+  const c = data.clients.find(x => x.id === clCtx.id);
+  c.deleted = true; touch(c);
+  closeSheet("client-overlay");
+  changed();
+}
+
+/* ================= expense modal ================= */
+let exCtx = { id: null };
+function openExpenseModal(id) {
+  exCtx = { id: id || null };
+  if (id) {
+    const x = data.expenses.find(k => k.id === id);
+    document.getElementById("ex-title").textContent = "Edit expense";
+    document.getElementById("ex-date").value = x.date;
+    document.getElementById("ex-amount").value = x.amount;
+    document.getElementById("ex-cat").value = x.category || "Other";
+    document.getElementById("ex-note").value = x.note || "";
+    document.getElementById("ex-delete").style.display = "";
+  } else {
+    document.getElementById("ex-title").textContent = "Add expense";
+    document.getElementById("ex-date").value = todayStr();
+    document.getElementById("ex-amount").value = "";
+    document.getElementById("ex-cat").value = "Gas";
+    document.getElementById("ex-note").value = "";
+    document.getElementById("ex-delete").style.display = "none";
+  }
+  document.getElementById("exp-overlay").classList.add("open");
+}
+function saveExpense() {
+  const date = document.getElementById("ex-date").value;
+  const amount = parseFloat(document.getElementById("ex-amount").value);
+  if (!date || isNaN(amount)) { alert("Need a date and an amount."); return; }
+  const rec = { date, amount, category: document.getElementById("ex-cat").value, note: document.getElementById("ex-note").value.trim() };
+  if (exCtx.id) {
+    const x = data.expenses.find(k => k.id === exCtx.id);
+    Object.assign(x, rec); touch(x);
+  } else {
+    data.expenses.push(touch(Object.assign({ id: uid() }, rec)));
+  }
+  closeSheet("exp-overlay");
+  changed();
+}
+function deleteExpense() {
+  if (!confirm("Delete this expense?")) return;
+  const x = data.expenses.find(k => k.id === exCtx.id);
+  x.deleted = true; touch(x);
+  closeSheet("exp-overlay");
+  changed();
+}
+
+/* ================= backup ================= */
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "neos-grass-backup-" + todayStr() + ".json";
+  a.click();
+}
+function importData(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const incoming = JSON.parse(r.result);
+      data = mergeData(data, incoming);
+      changed();
+      alert("Imported and merged.");
+    } catch (e) { alert("That file didn't look right."); }
+  };
+  r.readAsText(f);
+  ev.target.value = "";
+}
+
+/* ================= sync (GitHub) ================= */
+function setSyncStatus(cls, txt) {
+  const el = document.getElementById("syncdot");
+  el.className = "syncdot " + cls;
+  el.textContent = txt;
+}
+function apiUrl() {
+  return "https://api.github.com/repos/" + syncCfg.user + "/" + syncCfg.repo + "/contents/data.json";
+}
+function ghHeaders() {
+  return { "Authorization": "Bearer " + syncCfg.token, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
+}
+function b64enc(s) { return btoa(unescape(encodeURIComponent(s))); }
+function b64dec(s) { return decodeURIComponent(escape(atob(s.replace(/\n/g, "")))); }
+
+function mergeData(local, remote) {
+  const out = { clients: [], cuts: [], expenses: [] };
+  ["clients", "cuts", "expenses"].forEach(key => {
+    const map = new Map();
+    (remote[key] || []).forEach(r => { if (r && r.id) map.set(r.id, r); });
+    (local[key] || []).forEach(r => {
+      if (!r || !r.id) return;
+      const ex = map.get(r.id);
+      if (!ex || (r.updatedAt || "") > (ex.updatedAt || "")) map.set(r.id, r);
+    });
+    out[key] = Array.from(map.values());
+  });
+  return out;
+}
+
+async function pullRemote() {
+  if (!syncCfg.token || !syncCfg.user) return false;
+  setSyncStatus("busy", "syncing");
+  try {
+    const res = await fetch(apiUrl(), { headers: ghHeaders(), cache: "no-store" });
+    if (res.status === 404) { remoteSha = null; setSyncStatus("ok", "synced"); return true; }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const j = await res.json();
+    remoteSha = j.sha;
+    const remote = JSON.parse(b64dec(j.content));
+    data = mergeData(data, remote);
+    persistLocal();
+    renderAll();
+    setSyncStatus("ok", "synced");
+    return true;
+  } catch (e) {
+    setSyncStatus("err", "sync error");
+    return false;
+  }
+}
+
+async function pushRemote(retrying) {
+  if (!syncCfg.token || !syncCfg.user) return;
+  setSyncStatus("busy", "syncing");
+  try {
+    const body = { message: "sync " + new Date().toISOString(), content: b64enc(JSON.stringify(data)) };
+    if (remoteSha) body.sha = remoteSha;
+    const res = await fetch(apiUrl(), { method: "PUT", headers: ghHeaders(), body: JSON.stringify(body) });
+    if (res.status === 409 || res.status === 422) {
+      if (!retrying) { await pullRemote(); return pushRemote(true); }
+      throw new Error("conflict");
+    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const j = await res.json();
+    remoteSha = j.content.sha;
+    setSyncStatus("ok", "synced");
+  } catch (e) {
+    setSyncStatus("err", "sync error");
+  }
+}
+
+function schedulePush() {
+  if (!syncCfg.token || !syncCfg.user) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => pushRemote(false), 1500);
+}
+
+async function connectSync() {
+  syncCfg.user = document.getElementById("s-user").value.trim();
+  syncCfg.repo = document.getElementById("s-repo").value.trim() || "grass-data";
+  syncCfg.token = document.getElementById("s-token").value.trim();
+  localStorage.setItem(LS_SYNC, JSON.stringify(syncCfg));
+  const st = document.getElementById("s-status");
+  st.textContent = "Connecting…";
+  const ok = await pullRemote();
+  if (ok) {
+    await pushRemote(false);
+    st.textContent = "✓ Connected. This device now syncs automatically.";
+  } else {
+    st.textContent = "✗ Couldn't connect. Double-check username, repo name, and token.";
+  }
+}
+
+/* ================= boot ================= */
+document.getElementById("s-user").value = syncCfg.user || "";
+document.getElementById("s-repo").value = syncCfg.repo || "grass-data";
+document.getElementById("s-token").value = syncCfg.token || "";
+
+renderAll();
+if (syncCfg.token && syncCfg.user) { pullRemote(); } else { setSyncStatus("off", "local only"); }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && syncCfg.token && syncCfg.user) pullRemote();
+});
+
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
