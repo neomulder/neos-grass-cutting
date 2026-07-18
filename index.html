@@ -114,6 +114,7 @@
   }
   .badge.A { border-color: var(--blue); color: var(--blue); }
   .badge.B { border-color: var(--amber); color: var(--amber); }
+  .badge.AB { border-color: var(--green); color: var(--green); }
   .status { font-size: 11px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 5px; }
   .status.overdue { color: var(--red); }
   .status.due { color: var(--green); }
@@ -345,6 +346,7 @@
         <div class="segrow">
           <button id="cl-gA" onclick="setClGroup('A')">A</button>
           <button id="cl-gB" onclick="setClGroup('B')">B</button>
+          <button id="cl-gAB" onclick="setClGroup('AB')">Both</button>
         </div>
       </div>
       <div class="field"><label>Schedule</label>
@@ -513,7 +515,7 @@ function renderBoard() {
   const el = document.getElementById("board");
   el.innerHTML = "";
   let clients = live(data.clients).filter(c => c.active !== false);
-  if (boardFilter !== "ALL") clients = clients.filter(c => c.group === boardFilter);
+  if (boardFilter !== "ALL") clients = clients.filter(c => c.group === boardFilter || c.group === "AB");
   const rows = clients.map(c => ({ c, info: clientDueInfo(c) })).sort((a, b) => b.info.sort - a.info.sort);
   const ready = rows.filter(r => r.info.state === "overdue" || r.info.state === "due" || r.info.state === "okcut" || r.info.state === "new").length;
   document.getElementById("board-count").textContent = ready + " ready to cut";
@@ -523,7 +525,7 @@ function renderBoard() {
     card.innerHTML =
       '<div class="grow">' +
         '<div class="name">' + esc(c.name) + '</div>' +
-        '<div class="meta"><span class="badge ' + c.group + '">' + c.group + '</span>' +
+        '<div class="meta"><span class="badge ' + c.group + '">' + (c.group === "AB" ? "A+B" : c.group) + '</span>' +
           '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' +
           fmtMoney(+c.price || 0) + '</div>' +
         '<div class="status ' + info.state + '">' + info.label + '</div>' +
@@ -548,7 +550,7 @@ function renderClients() {
     card.innerHTML =
       '<div class="grow">' +
         '<div class="name">' + esc(c.name) + (c.active === false ? ' <span class="badge">INACTIVE</span>' : '') + '</div>' +
-        '<div class="meta"><span class="badge ' + c.group + '">' + c.group + '</span>' +
+        '<div class="meta"><span class="badge ' + c.group + '">' + (c.group === "AB" ? "A+B" : c.group) + '</span>' +
           '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' + fmtMoney(+c.price || 0) + '</div>' +
         '<div class="meta">' + (c.address ? '<a href="' + mapsUrl + '">' + esc(c.address) + '</a>' : '') +
           (c.phone ? ' · <a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : '') + '</div>' +
@@ -724,6 +726,7 @@ function setClGroup(g) {
   clCtx.group = g;
   document.getElementById("cl-gA").className = g === "A" ? "on" : "";
   document.getElementById("cl-gB").className = g === "B" ? "on" : "";
+  document.getElementById("cl-gAB").className = g === "AB" ? "on" : "";
 }
 function setClFreq(f) {
   clCtx.freq = f;
