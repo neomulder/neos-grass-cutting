@@ -76,6 +76,12 @@
     color: var(--ink-2); margin: 22px 0 10px;
   }
   h2.sec small { color: var(--muted); font-weight: 700; letter-spacing: 0.06em; text-transform: none; float: right; }
+  .dayhead {
+    font-size: 12px; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--green); margin: 18px 0 8px; border-bottom: 1px solid var(--hairline); padding-bottom: 5px;
+  }
+  .dayhead.today { color: var(--ink); }
+  .dayhead small { color: var(--muted); font-weight: 700; letter-spacing: 0.04em; float: right; }
 
   /* ---- chart ---- */
   .chartbox { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 14px; margin-top: 10px; position: relative; }
@@ -469,18 +475,21 @@ function fmtDayShort(s) { const d = parseDay(s); return (d.getMonth() + 1) + "/"
 function sameMonth(s, ref) { return s.slice(0, 7) === ref.slice(0, 7); }
 function sameYear(s, ref) { return s.slice(0, 4) === ref.slice(0, 4); }
 
-/* ================= due logic ================= */
-function clientDueInfo(c) {
-  const cuts = live(data.cuts).filter(x => x.clientId === c.id).sort((a, b) => b.date.localeCompare(a.date));
-  const last = cuts[0] || null;
-  if (!last) return { state: "new", label: "NEW — cut anytime", days: null, sort: 900 };
-  const days = daysBetween(last.date, todayStr());
-  if (days < 0) return { state: "wait", label: "CUT LOGGED FOR " + fmtDayShort(last.date), days, sort: -1 };
-  const freq = c.freq || 7;
-  if (days > freq) return { state: "overdue", label: "OVERDUE — " + days + " days since cut", days, sort: 1000 + days };
-  if (days === freq) return { state: "due", label: "DUE TODAY — " + days + " days since cut", days, sort: 950 };
-  if (days >= MIN_GAP_DAYS) return { state: "okcut", label: "OK TO CUT — " + days + " days since cut", days, sort: 800 + days };
-  return { state: "wait", label: "WAIT " + (MIN_GAP_DAYS - days) + " MORE DAY" + (MIN_GAP_DAYS - days > 1 ? "S" : "") + " — cut " + days + "d ago", days, sort: days };
+/* ================= due / schedule logic ================= */
+function toDayStr(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function nextDueDate(c, lastDate) {
+  const d = parseDay(lastDate);
+  d.setDate(d.getDate() + (c.freq || 7));
+  const dow = d.getDay();
+  if (dow === 6) d.setDate(d.getDate() + 2);      // Saturday due -> Monday
+  else if (dow === 0) d.setDate(d.getDate() + 1); // Sunday due -> Monday
+  return toDayStr(d);
+}
+function fmtSched(s) {
+  const d = parseDay(s);
+  return d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase() + " " + (d.getMonth() + 1) + "/" + d.getDate();
 }
 
 /* ================= rendering ================= */
@@ -626,23 +635,69 @@ function renderBoard() {
   el.innerHTML = "";
   let clients = live(data.clients).filter(c => c.active !== false);
   if (boardFilter !== "ALL") clients = clients.filter(c => c.group === boardFilter || c.group === "AB");
-  const rows = clients.map(c => ({ c, info: clientDueInfo(c) })).sort((a, b) => b.info.sort - a.info.sort);
-  const ready = rows.filter(r => r.info.state === "overdue" || r.info.state === "due" || r.info.state === "okcut" || r.info.state === "new").length;
-  document.getElementById("board-count").textContent = ready + " ready to cut";
-  if (!rows.length) { el.innerHTML = '<div class="empty">No clients yet — add them in the Clients tab.</div>'; return; }
-  rows.forEach(({ c, info }) => {
-    const card = document.createElement("div"); card.className = "card";
-    card.innerHTML =
-      '<div class="grow">' +
-        '<div class="name">' + esc(c.name) + '</div>' +
-        '<div class="meta"><span class="badge ' + c.group + '">' + (c.group === "AB" ? "A+B" : c.group) + '</span>' +
-          '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' +
-          fmtMoney(+c.price || 0) + '</div>' +
-        '<div class="status ' + info.state + '">' + info.label + '</div>' +
-      '</div>' +
-      '<button class="btn cut">Cut ✓</button>';
-    card.querySelector(".btn.cut").addEventListener("click", () => openCutModal(c.id));
-    el.appendChild(card);
+  const t = todayStr();
+  const buckets = new Map();
+  const push = (k, row) => { if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(row); };
+  let ready = 0;
+
+  clients.forEach(c => {
+    const cuts = live(data.cuts).filter(x => x.clientId === c.id).sort((a, b) => b.date.localeCompare(a.date));
+    const last = cuts[0];
+    if (!last) { push("new", { c, state: "okcut", label: "NEW — cut anytime", sort: 0 }); ready++; return; }
+    const days = daysBetween(last.date, t);
+    if (days < 0) { push("later", { c, state: "wait", label: "CUT LOGGED FOR " + fmtSched(last.date), sort: 998 }); return; }
+    const due = nextDueDate(c, last.date);
+    const ahead = daysBetween(t, due);
+    if (ahead <= 0) {
+      const od = -ahead;
+      const canCut = days >= MIN_GAP_DAYS;
+      push("today", { c,
+        state: od > 0 ? "overdue" : (canCut ? "due" : "wait"),
+        label: (od > 0 ? "OVERDUE — was due " + fmtSched(due) : "DUE TODAY") + " · cut " + days + "d ago" + (canCut ? "" : " (under 6d!)"),
+        sort: -od });
+      ready++;
+    } else if (ahead <= 7) {
+      const early = days >= MIN_GAP_DAYS;
+      push(due, { c, state: early ? "okcut" : "wait",
+        label: "cut " + days + "d ago" + (early ? " — OK to cut early" : ""), sort: early ? 0 : 1 });
+    } else {
+      push("later", { c, state: "wait", label: "due " + fmtSched(due) + " · cut " + days + "d ago", sort: ahead });
+    }
+  });
+
+  document.getElementById("board-count").textContent = ready + " to cut today";
+  if (!clients.length) { el.innerHTML = '<div class="empty">No clients yet — add them in the Clients tab.</div>'; return; }
+
+  const dayKeys = Array.from(buckets.keys()).filter(k => k !== "today" && k !== "later" && k !== "new").sort();
+  const order = [];
+  if (buckets.has("today")) order.push(["today", "TODAY — " + fmtSched(t)]);
+  const tomorrow = (() => { const d = parseDay(t); d.setDate(d.getDate() + 1); return toDayStr(d); })();
+  dayKeys.forEach(k => order.push([k, (k === tomorrow ? "TOMORROW — " : "") + fmtSched(k)]));
+  if (buckets.has("later")) order.push(["later", "NEXT WEEK +"]);
+  if (buckets.has("new")) order.push(["new", "NEW — PICK A DAY"]);
+
+  order.forEach(([key, title]) => {
+    const rows = buckets.get(key);
+    rows.sort((a, b) => a.sort - b.sort || (a.c.address || a.c.name).localeCompare(b.c.address || b.c.name));
+    const money = rows.reduce((s, r) => s + (+r.c.price || 0), 0);
+    const h = document.createElement("div");
+    h.className = "dayhead" + (key === "today" ? " today" : "");
+    h.innerHTML = esc(title) + "<small>" + rows.length + " · " + fmtMoney(money) + "</small>";
+    el.appendChild(h);
+    rows.forEach(({ c, state, label }) => {
+      const card = document.createElement("div"); card.className = "card";
+      card.innerHTML =
+        '<div class="grow">' +
+          '<div class="name">' + esc(c.name !== "?" && c.name ? c.name : (c.address || "?")) + '</div>' +
+          '<div class="meta"><span class="badge ' + c.group + '">' + (c.group === "AB" ? "A+B" : c.group) + '</span>' +
+            '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' +
+            fmtMoney(+c.price || 0) + (c.name !== "?" && c.name && c.address ? " · " + esc(c.address) : "") + '</div>' +
+          '<div class="status ' + state + '">' + esc(label) + '</div>' +
+        '</div>' +
+        '<button class="btn cut">Cut ✓</button>';
+      card.querySelector(".btn.cut").addEventListener("click", () => openCutModal(c.id));
+      el.appendChild(card);
+    });
   });
 }
 
