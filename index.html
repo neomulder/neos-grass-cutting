@@ -277,11 +277,11 @@
       </div>
     </div>
 
-    <h2 class="sec">Monthly billing <small id="monthly-total"></small></h2>
-    <div id="monthlylist"></div>
-
     <h2 class="sec">Waiting on payment <small id="unpaid-total"></small></h2>
     <div id="unpaidlist"></div>
+
+    <h2 class="sec">Monthly clients — still owe <small id="monthly-total"></small></h2>
+    <div id="monthlylist"></div>
 
     <h2 class="sec">Expenses</h2>
     <button class="btn ghost big" onclick="openExpenseModal()">+ Add expense</button>
@@ -813,18 +813,20 @@ function renderMonthlySection() {
   if (created) { persistLocal(); schedulePush(); }
 
   el.innerHTML = "";
-  const owed = rows.filter(r => !r.rec.paid).reduce((s, r) => s + (+r.rec.amount || 0), 0);
-  document.getElementById("monthly-total").textContent = rows.length ? (owed ? fmtMoney(owed) + " owed this month" : "all collected") : "";
+  const owingRows = rows.filter(r => !r.rec.paid);
+  const owed = owingRows.reduce((s, r) => s + (+r.rec.amount || 0), 0);
+  document.getElementById("monthly-total").textContent = rows.length ? (owingRows.length ? fmtMoney(owed) + " owed" : "all collected") : "";
   if (!rows.length) { el.innerHTML = '<div class="empty">No monthly-billing clients.</div>'; return; }
-  rows.sort((a, b) => (a.rec.paid - b.rec.paid) || (a.c.name || "").localeCompare(b.c.name || ""));
-  rows.forEach(({ c, rec }) => {
+  if (!owingRows.length) { el.innerHTML = '<div class="empty">All monthly clients paid up for ' + esc(fmtMonthLabel(ym)) + '. 💪</div>'; return; }
+  owingRows.sort((a, b) => (a.c.name || "").localeCompare(b.c.name || ""));
+  owingRows.forEach(({ c, rec }) => {
     const row = document.createElement("div"); row.className = "rowline";
     row.innerHTML =
       '<div class="grow"><b>' + esc(c.name !== "?" && c.name ? c.name : (c.address || "?")) + '</b><div class="sub">' + esc(fmtMonthLabel(ym)) + '</div></div>' +
       '<span class="amt">' + fmtMoney(+rec.amount || 0) + '</span>' +
-      '<button class="btn ' + (rec.paid ? "ghost" : "pay") + '">' + (rec.paid ? "Paid ✓" : "Mark paid") + '</button>';
+      '<button class="btn pay">Mark paid</button>';
     row.querySelector("button").addEventListener("click", () => {
-      rec.paid = !rec.paid; touch(rec); changed();
+      rec.paid = true; touch(rec); changed();
     });
     el.appendChild(row);
   });
@@ -845,21 +847,33 @@ function renderMoney() {
   const yearExp = exps.filter(x => sameYear(x.date, t)).reduce((s, x) => s + (+x.amount || 0), 0);
   document.getElementById("m-exp-sub").textContent = fmtMoney(yearExp) + " this year";
 
-  /* unpaid */
+  /* unpaid — one row per client, even if they owe for multiple cuts */
   const unpaidEl = document.getElementById("unpaidlist");
   unpaidEl.innerHTML = "";
-  const unpaid = cuts.filter(x => !x.paid).sort((a, b) => a.date.localeCompare(b.date));
+  const unpaid = cuts.filter(x => !x.paid);
   document.getElementById("unpaid-total").textContent = fmtMoney(unpaid.reduce((s, x) => s + (+x.amount || 0), 0)) + " owed";
-  if (!unpaid.length) unpaidEl.innerHTML = '<div class="empty">Nobody owes you. 💪</div>';
+  const byClient = new Map();
   unpaid.forEach(x => {
-    const c = data.clients.find(cl => cl.id === x.clientId);
+    if (!byClient.has(x.clientId)) byClient.set(x.clientId, []);
+    byClient.get(x.clientId).push(x);
+  });
+  const groups = Array.from(byClient.entries()).map(([clientId, list]) => ({
+    c: data.clients.find(cl => cl.id === clientId),
+    list: list.sort((a, b) => a.date.localeCompare(b.date)),
+    total: list.reduce((s, x) => s + (+x.amount || 0), 0)
+  })).sort((a, b) => (a.c ? (a.c.name !== "?" && a.c.name ? a.c.name : a.c.address) : "").localeCompare(b.c ? (b.c.name !== "?" && b.c.name ? b.c.name : b.c.address) : ""));
+  if (!groups.length) unpaidEl.innerHTML = '<div class="empty">Nobody owes you. 💪</div>';
+  groups.forEach(g => {
     const row = document.createElement("div"); row.className = "rowline";
+    const dates = g.list.map(x => fmtDayShort(x.date)).join(", ");
     row.innerHTML =
-      '<div class="grow"><b>' + esc(c ? c.name : "?") + '</b><div class="sub">' + fmtDayShort(x.date) + (x.note ? " · " + esc(x.note) : "") + '</div></div>' +
-      '<span class="amt">' + fmtMoney(+x.amount || 0) + '</span>' +
+      '<div class="grow"><b>' + esc(g.c ? (g.c.name !== "?" && g.c.name ? g.c.name : g.c.address) : "?") + '</b><div class="sub">' +
+        g.list.length + ' cut' + (g.list.length === 1 ? "" : "s") + ' · ' + esc(dates) + '</div></div>' +
+      '<span class="amt">' + fmtMoney(g.total) + '</span>' +
       '<button class="btn pay">Paid ✓</button>';
     row.querySelector(".btn.pay").addEventListener("click", () => {
-      x.paid = true; touch(x); changed();
+      g.list.forEach(x => { x.paid = true; touch(x); });
+      changed();
     });
     unpaidEl.appendChild(row);
   });
