@@ -129,7 +129,7 @@
 
   .btn {
     border: none; border-radius: 10px; font-weight: 900; font-size: 13px; letter-spacing: 0.04em;
-    padding: 10px 14px; cursor: pointer; text-transform: uppercase;
+    padding: 10px 14px; cursor: pointer; text-transform: uppercase; text-decoration: none; display: inline-block; text-align: center;
   }
   .btn.cut { background: var(--green); color: #04220a; }
   .btn.ghost { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--baseline); }
@@ -137,6 +137,9 @@
   .btn.big { width: 100%; padding: 14px; font-size: 15px; margin-top: 8px; }
   .btn.primary { background: var(--green); color: #04220a; }
   .btn.danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
+  .btn.sm { padding: 8px 12px; font-size: 10px; white-space: nowrap; }
+  .card .btncol { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .skiplink { color: var(--muted); text-decoration: underline; margin-left: 6px; font-weight: 700; cursor: pointer; }
 
   .rowline {
     display: flex; align-items: center; gap: 10px; padding: 11px 2px;
@@ -252,6 +255,10 @@
   <section class="tab" id="tab-clients">
     <button class="btn primary big" onclick="openClientModal()">+ New client</button>
     <h2 class="sec">Clients <small id="client-count"></small></h2>
+    <div class="filters" id="client-filters">
+      <button class="chipbtn on" data-f="active">Active</button>
+      <button class="chipbtn" data-f="archived">Archived</button>
+    </div>
     <div id="clientlist"></div>
   </section>
 
@@ -269,6 +276,9 @@
         <div class="sub" id="m-exp-sub"></div>
       </div>
     </div>
+
+    <h2 class="sec">Monthly billing <small id="monthly-total"></small></h2>
+    <div id="monthlylist"></div>
 
     <h2 class="sec">Waiting on payment <small id="unpaid-total"></small></h2>
     <div id="unpaidlist"></div>
@@ -357,14 +367,15 @@
     <h3 id="cut-title">Log a cut</h3>
     <div class="field2">
       <div class="field"><label>Date</label><input type="date" id="c-date"></div>
-      <div class="field"><label>Amount $</label><input type="number" id="c-amount" inputmode="decimal" step="0.01"></div>
+      <div class="field" id="cut-amount-wrap"><label>Amount $</label><input type="number" id="c-amount" inputmode="decimal" step="0.01"></div>
     </div>
-    <div class="field"><label>Paid?</label>
+    <div class="field" id="cut-paid-wrap"><label>Paid?</label>
       <div class="segrow">
         <button id="c-paid-yes" onclick="setCutPaid(true)">Paid ✓</button>
         <button id="c-paid-no" onclick="setCutPaid(false)">Not yet</button>
       </div>
     </div>
+    <p class="note" id="cut-monthly-note" style="display:none;margin:-4px 0 12px">This client is billed monthly — tracked in the Money tab, not per cut.</p>
     <div class="field"><label>Note (optional)</label><input id="c-note" placeholder="edged, bagged, gate was locked..."></div>
     <div class="actions">
       <button class="btn danger" id="c-delete" onclick="deleteCut()" style="display:none">Delete</button>
@@ -396,10 +407,16 @@
         </div>
       </div>
     </div>
-    <div class="field"><label>Price per cut $</label><input id="cl-price" type="number" inputmode="decimal" step="0.01"></div>
+    <div class="field"><label>Billing</label>
+      <div class="segrow">
+        <button id="cl-bpercut" onclick="setClBilling('percut')">Per cut</button>
+        <button id="cl-bmonthly" onclick="setClBilling('monthly')">Monthly</button>
+      </div>
+    </div>
+    <div class="field"><label id="cl-price-label">Price per cut $</label><input id="cl-price" type="number" inputmode="decimal" step="0.01"></div>
     <div class="field"><label>Notes (optional)</label><input id="cl-notes" placeholder="dog in yard, pay via check..."></div>
     <div class="actions">
-      <button class="btn danger" id="cl-delete" onclick="deleteClient()" style="display:none">Delete</button>
+      <button class="btn ghost" id="cl-archive" onclick="toggleArchive()" style="display:none">Archive</button>
       <button class="btn ghost" onclick="closeSheet('client-overlay')">Cancel</button>
       <button class="btn primary" onclick="saveClient()">Save</button>
     </div>
@@ -444,9 +461,11 @@ let pushTimer = null;
 let boardFilter = "ALL";
 
 function loadLocal() {
+  const d = { clients: [], cuts: [], expenses: [], monthly: [] };
   const raw = localStorage.getItem(LS_DATA);
-  if (raw) { try { return JSON.parse(raw); } catch (e) {} }
-  return { clients: [], cuts: [], expenses: [] };
+  if (raw) { try { Object.assign(d, JSON.parse(raw)); } catch (e) {} }
+  d.monthly = d.monthly || [];
+  return d;
 }
 function persistLocal() { localStorage.setItem(LS_DATA, JSON.stringify(data)); }
 
@@ -491,6 +510,25 @@ function fmtSched(s) {
   const d = parseDay(s);
   return d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase() + " " + (d.getMonth() + 1) + "/" + d.getDate();
 }
+function dirUrl(addr) { return "https://maps.apple.com/?daddr=" + encodeURIComponent(addr) + "&dirflg=d"; }
+function currentMonthStr() { return todayStr().slice(0, 7); }
+function fmtMonthLabel(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+function skipClient(id) {
+  const c = data.clients.find(x => x.id === id);
+  if (!c) return;
+  const cuts = live(data.cuts).filter(x => x.clientId === id).sort((a, b) => b.date.localeCompare(a.date));
+  const base = cuts[0] ? cuts[0].date : todayStr();
+  const naturalDue = nextDueDate(c, base);
+  const pushedDue = nextDueDate(c, naturalDue);
+  const label = c.name !== "?" && c.name ? c.name : (c.address || "this client");
+  if (!confirm("Skip " + label + " this cycle? They'll come back up around " + fmtSched(pushedDue) + ".")) return;
+  c.skipUntil = pushedDue;
+  touch(c);
+  changed();
+}
 
 /* ================= rendering ================= */
 function renderAll() { renderTiles(); renderChart(); renderBoard(); renderClients(); renderMoney(); renderDays(); }
@@ -527,11 +565,13 @@ function renderDays() {
   cEl.innerHTML = "";
   cuts.forEach(x => {
     const c = data.clients.find(cl => cl.id === x.clientId);
+    const isMonthly = c && c.billing === "monthly";
     const row = document.createElement("div"); row.className = "rowline";
     row.innerHTML =
-      '<div class="grow"><b>' + esc(c ? c.name : "?") + '</b><div class="sub">' + esc(c && c.address ? c.address : "") + (x.note ? " · " + esc(x.note) : "") + '</div></div>' +
-      '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span>' +
-      '<span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>';
+      '<div class="grow"><b>' + esc(c ? (c.name !== "?" && c.name ? c.name : c.address) : "?") + '</b><div class="sub">' + esc(c && c.address ? c.address : "") + (x.note ? " · " + esc(x.note) : "") + '</div></div>' +
+      (isMonthly
+        ? '<span class="paidtag" style="color:var(--blue)">MONTHLY</span>'
+        : '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span><span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>');
     row.style.cursor = "pointer";
     row.addEventListener("click", () => openCutModal(x.clientId, x.id));
     cEl.appendChild(row);
@@ -643,25 +683,42 @@ function renderBoard() {
   clients.forEach(c => {
     const cuts = live(data.cuts).filter(x => x.clientId === c.id).sort((a, b) => b.date.localeCompare(a.date));
     const last = cuts[0];
-    if (!last) { push("new", { c, state: "okcut", label: "NEW — cut anytime", sort: 0 }); ready++; return; }
+    const skipActive = !!(c.skipUntil && c.skipUntil >= t);
+
+    if (!last) {
+      if (skipActive) {
+        const ahead = daysBetween(t, c.skipUntil);
+        const label = "SKIPPED — back " + fmtSched(c.skipUntil);
+        if (ahead <= 0) push("today", { c, state: "wait", label, sort: 500, skippable: false });
+        else if (ahead <= 7) push(c.skipUntil, { c, state: "wait", label, sort: 2, skippable: false });
+        else push("later", { c, state: "wait", label, sort: ahead, skippable: false });
+      } else {
+        push("new", { c, state: "okcut", label: "NEW — cut anytime", sort: 0, skippable: true }); ready++;
+      }
+      return;
+    }
     const days = daysBetween(last.date, t);
-    if (days < 0) { push("later", { c, state: "wait", label: "CUT LOGGED FOR " + fmtSched(last.date), sort: 998 }); return; }
-    const due = nextDueDate(c, last.date);
+    if (days < 0) { push("later", { c, state: "wait", label: "CUT LOGGED FOR " + fmtSched(last.date), sort: 998, skippable: true }); return; }
+
+    let due = nextDueDate(c, last.date);
+    let skipped = false;
+    if (skipActive && c.skipUntil > due) { due = c.skipUntil; skipped = true; }
     const ahead = daysBetween(t, due);
+
     if (ahead <= 0) {
       const od = -ahead;
       const canCut = days >= MIN_GAP_DAYS;
-      push("today", { c,
-        state: od > 0 ? "overdue" : (canCut ? "due" : "wait"),
-        label: (od > 0 ? "OVERDUE — was due " + fmtSched(due) : "DUE TODAY") + " · cut " + days + "d ago" + (canCut ? "" : " (under 6d!)"),
-        sort: -od });
-      ready++;
+      const label = skipped ? "SKIPPED — was due " + fmtSched(due)
+        : (od > 0 ? "OVERDUE — was due " + fmtSched(due) : "DUE TODAY") + " · cut " + days + "d ago" + (canCut ? "" : " (under 6d!)");
+      push("today", { c, state: skipped ? "wait" : (od > 0 ? "overdue" : (canCut ? "due" : "wait")), label, sort: skipped ? 500 : -od, skippable: !skipped });
+      if (!skipped) ready++;
     } else if (ahead <= 7) {
       const early = days >= MIN_GAP_DAYS;
-      push(due, { c, state: early ? "okcut" : "wait",
-        label: "cut " + days + "d ago" + (early ? " — OK to cut early" : ""), sort: early ? 0 : 1 });
+      const label = skipped ? "SKIPPED — back " + fmtSched(due) : ("cut " + days + "d ago" + (early ? " — OK to cut early" : ""));
+      push(due, { c, state: skipped ? "wait" : (early ? "okcut" : "wait"), label, sort: skipped ? 2 : (early ? 0 : 1), skippable: !skipped });
     } else {
-      push("later", { c, state: "wait", label: "due " + fmtSched(due) + " · cut " + days + "d ago", sort: ahead });
+      const label = (skipped ? "SKIPPED — " : "") + "due " + fmtSched(due) + " · cut " + days + "d ago";
+      push("later", { c, state: "wait", label, sort: ahead, skippable: !skipped });
     }
   });
 
@@ -679,56 +736,102 @@ function renderBoard() {
   order.forEach(([key, title]) => {
     const rows = buckets.get(key);
     rows.sort((a, b) => a.sort - b.sort || (a.c.address || a.c.name).localeCompare(b.c.address || b.c.name));
-    const money = rows.reduce((s, r) => s + (+r.c.price || 0), 0);
+    const money = rows.reduce((s, r) => s + (r.c.billing === "monthly" ? 0 : (+r.c.price || 0)), 0);
     const h = document.createElement("div");
     h.className = "dayhead" + (key === "today" ? " today" : "");
     h.innerHTML = esc(title) + "<small>" + rows.length + " · " + fmtMoney(money) + "</small>";
     el.appendChild(h);
-    rows.forEach(({ c, state, label }) => {
+    rows.forEach(({ c, state, label, skippable }) => {
       const card = document.createElement("div"); card.className = "card";
+      const dirBtn = c.address ? '<a class="btn ghost sm" target="_blank" rel="noopener" href="' + dirUrl(c.address) + '">Directions</a>' : '';
       card.innerHTML =
         '<div class="grow">' +
           '<div class="name">' + esc(c.name !== "?" && c.name ? c.name : (c.address || "?")) + '</div>' +
           '<div class="meta"><span class="badge ' + c.group + '">' + (c.group === "AB" ? "A+B" : c.group) + '</span>' +
             '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' +
-            fmtMoney(+c.price || 0) + (c.name !== "?" && c.name && c.address ? " · " + esc(c.address) : "") + '</div>' +
-          '<div class="status ' + state + '">' + esc(label) + '</div>' +
+            (c.billing === "monthly" ? '<span class="badge" style="border-color:var(--blue);color:var(--blue)">MONTHLY</span>' : fmtMoney(+c.price || 0)) +
+            (c.name !== "?" && c.name && c.address ? " · " + esc(c.address) : "") + '</div>' +
+          '<div class="status ' + state + '">' + esc(label) + (skippable ? ' <span class="skiplink">Skip</span>' : '') + '</div>' +
         '</div>' +
-        '<button class="btn cut">Cut ✓</button>';
+        '<div class="btncol">' + dirBtn + '<button class="btn cut sm">Cut ✓</button></div>';
       card.querySelector(".btn.cut").addEventListener("click", () => openCutModal(c.id));
+      const sk = card.querySelector(".skiplink");
+      if (sk) sk.addEventListener("click", (e) => { e.stopPropagation(); skipClient(c.id); });
       el.appendChild(card);
     });
   });
 }
 
+let clientFilter = "active";
 function renderClients() {
   const el = document.getElementById("clientlist");
   el.innerHTML = "";
-  const clients = live(data.clients).sort((a, b) => (a.group + a.name).localeCompare(b.group + b.name));
-  document.getElementById("client-count").textContent = clients.length + " total";
-  if (!clients.length) { el.innerHTML = '<div class="empty">No clients yet. Hit that green button.</div>'; return; }
+  let clients = live(data.clients);
+  clients = clientFilter === "archived" ? clients.filter(c => c.active === false) : clients.filter(c => c.active !== false);
+  clients.sort((a, b) => (a.group + a.name).localeCompare(b.group + b.name));
+  document.getElementById("client-count").textContent = clients.length + (clientFilter === "archived" ? " archived" : " active");
+  if (!clients.length) {
+    el.innerHTML = '<div class="empty">' + (clientFilter === "archived" ? "No archived clients." : "No clients yet. Hit that green button.") + '</div>';
+    return;
+  }
   clients.forEach(c => {
     const cuts = live(data.cuts).filter(x => x.clientId === c.id);
     const lastCut = cuts.sort((a, b) => b.date.localeCompare(a.date))[0];
     const card = document.createElement("div"); card.className = "card";
-    const mapsUrl = "https://maps.apple.com/?q=" + encodeURIComponent(c.address || "");
+    const dirBtn = c.address ? '<a class="btn ghost sm" target="_blank" rel="noopener" href="' + dirUrl(c.address) + '">Directions</a>' : '';
     card.innerHTML =
       '<div class="grow">' +
-        '<div class="name">' + esc(c.name) + (c.active === false ? ' <span class="badge">INACTIVE</span>' : '') + '</div>' +
+        '<div class="name">' + esc(c.name) + (c.active === false ? ' <span class="badge">ARCHIVED</span>' : '') + '</div>' +
         '<div class="meta"><span class="badge ' + c.group + '">' + (c.group === "AB" ? "A+B" : c.group) + '</span>' +
-          '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' + fmtMoney(+c.price || 0) + '</div>' +
-        '<div class="meta">' + (c.address ? '<a href="' + mapsUrl + '">' + esc(c.address) + '</a>' : '') +
+          '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' +
+          (c.billing === "monthly" ? '<span class="badge" style="border-color:var(--blue);color:var(--blue)">MONTHLY ' + fmtMoney(+c.price || 0) + '</span>' : fmtMoney(+c.price || 0)) + '</div>' +
+        '<div class="meta">' + (c.address ? esc(c.address) : '') +
           (c.phone ? ' · <a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : '') + '</div>' +
         '<div class="meta">' + (lastCut ? "Last cut " + fmtDayShort(lastCut.date) + " · " + cuts.length + " cuts all-time" : "Never cut yet") +
           (c.notes ? " · " + esc(c.notes) : "") + '</div>' +
       '</div>' +
-      '<button class="btn ghost">Edit</button>';
-    card.querySelector(".btn.ghost").addEventListener("click", () => openClientModal(c.id));
+      '<div class="btncol">' + dirBtn + '<button class="btn ghost sm editbtn">Edit</button></div>';
+    card.querySelector(".editbtn").addEventListener("click", () => openClientModal(c.id));
     el.appendChild(card);
   });
 }
 
+function renderMonthlySection() {
+  const el = document.getElementById("monthlylist");
+  const ym = currentMonthStr();
+  const clients = live(data.clients).filter(c => c.active !== false && c.billing === "monthly");
+  let created = false;
+  const rows = clients.map(c => {
+    let rec = data.monthly.find(m => !m.deleted && m.clientId === c.id && m.month === ym);
+    if (!rec) {
+      rec = touch({ id: uid(), clientId: c.id, month: ym, amount: +c.price || 0, paid: false });
+      data.monthly.push(rec);
+      created = true;
+    }
+    return { c, rec };
+  });
+  if (created) { persistLocal(); schedulePush(); }
+
+  el.innerHTML = "";
+  const owed = rows.filter(r => !r.rec.paid).reduce((s, r) => s + (+r.rec.amount || 0), 0);
+  document.getElementById("monthly-total").textContent = rows.length ? (owed ? fmtMoney(owed) + " owed this month" : "all collected") : "";
+  if (!rows.length) { el.innerHTML = '<div class="empty">No monthly-billing clients.</div>'; return; }
+  rows.sort((a, b) => (a.rec.paid - b.rec.paid) || (a.c.name || "").localeCompare(b.c.name || ""));
+  rows.forEach(({ c, rec }) => {
+    const row = document.createElement("div"); row.className = "rowline";
+    row.innerHTML =
+      '<div class="grow"><b>' + esc(c.name !== "?" && c.name ? c.name : (c.address || "?")) + '</b><div class="sub">' + esc(fmtMonthLabel(ym)) + '</div></div>' +
+      '<span class="amt">' + fmtMoney(+rec.amount || 0) + '</span>' +
+      '<button class="btn ' + (rec.paid ? "ghost" : "pay") + '">' + (rec.paid ? "Paid ✓" : "Mark paid") + '</button>';
+    row.querySelector("button").addEventListener("click", () => {
+      rec.paid = !rec.paid; touch(rec); changed();
+    });
+    el.appendChild(row);
+  });
+}
+
 function renderMoney() {
+  renderMonthlySection();
   const t = todayStr();
   const cuts = live(data.cuts);
   const exps = live(data.expenses);
@@ -780,11 +883,13 @@ function renderMoney() {
   histEl.innerHTML = "";
   cuts.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 40).forEach(x => {
     const c = data.clients.find(cl => cl.id === x.clientId);
+    const isMonthly = c && c.billing === "monthly";
     const row = document.createElement("div"); row.className = "rowline";
     row.innerHTML =
-      '<div class="grow"><b>' + esc(c ? c.name : "?") + '</b><div class="sub">' + fmtDayShort(x.date) + '</div></div>' +
-      '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span>' +
-      '<span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>';
+      '<div class="grow"><b>' + esc(c ? (c.name !== "?" && c.name ? c.name : c.address) : "?") + '</b><div class="sub">' + fmtDayShort(x.date) + '</div></div>' +
+      (isMonthly
+        ? '<span class="paidtag" style="color:var(--blue)">MONTHLY</span>'
+        : '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span><span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>');
     row.style.cursor = "pointer";
     row.addEventListener("click", () => openCutModal(x.clientId, x.id));
     histEl.appendChild(row);
@@ -812,6 +917,14 @@ document.querySelectorAll("#board-filters .chipbtn").forEach(b => {
     renderBoard();
   });
 });
+document.querySelectorAll("#client-filters .chipbtn").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#client-filters .chipbtn").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    clientFilter = b.dataset.f;
+    renderClients();
+  });
+});
 
 function closeSheet(id) { document.getElementById(id).classList.remove("open"); }
 
@@ -827,8 +940,12 @@ function lockSave() {
 let cutCtx = { clientId: null, cutId: null, paid: true };
 function openCutModal(clientId, cutId) {
   const c = data.clients.find(x => x.id === clientId);
+  const isMonthly = c && c.billing === "monthly";
   cutCtx = { clientId, cutId: cutId || null, paid: true };
-  document.getElementById("cut-title").textContent = (cutId ? "Edit cut — " : "Log cut — ") + (c ? c.name : "");
+  document.getElementById("cut-title").textContent = (cutId ? "Edit cut — " : "Log cut — ") + (c ? (c.name !== "?" && c.name ? c.name : c.address) : "");
+  document.getElementById("cut-amount-wrap").style.display = isMonthly ? "none" : "";
+  document.getElementById("cut-paid-wrap").style.display = isMonthly ? "none" : "";
+  document.getElementById("cut-monthly-note").style.display = isMonthly ? "" : "none";
   if (cutId) {
     const x = data.cuts.find(k => k.id === cutId);
     document.getElementById("c-date").value = x.date;
@@ -838,7 +955,7 @@ function openCutModal(clientId, cutId) {
     document.getElementById("c-delete").style.display = "";
   } else {
     document.getElementById("c-date").value = todayStr();
-    document.getElementById("c-amount").value = c && c.price ? c.price : "";
+    document.getElementById("c-amount").value = (!isMonthly && c && c.price) ? c.price : "";
     document.getElementById("c-note").value = "";
     document.getElementById("c-delete").style.display = "none";
   }
@@ -852,16 +969,20 @@ function setCutPaid(v) {
 }
 function saveCut() {
   if (lockSave()) return;
+  const c = data.clients.find(x => x.id === cutCtx.clientId);
+  const isMonthly = c && c.billing === "monthly";
   const date = document.getElementById("c-date").value;
-  const amount = parseFloat(document.getElementById("c-amount").value);
-  if (!date || isNaN(amount)) { alert("Need a date and an amount."); return; }
+  const amount = isMonthly ? 0 : parseFloat(document.getElementById("c-amount").value);
+  if (!date || (!isMonthly && isNaN(amount))) { alert("Need a date and an amount."); return; }
+  const paid = isMonthly ? true : cutCtx.paid;
   const note = document.getElementById("c-note").value.trim();
   if (cutCtx.cutId) {
     const x = data.cuts.find(k => k.id === cutCtx.cutId);
-    Object.assign(x, { date, amount, paid: cutCtx.paid, note });
+    Object.assign(x, { date, amount, paid, note });
     touch(x);
   } else {
-    data.cuts.push(touch({ id: uid(), clientId: cutCtx.clientId, date, amount, paid: cutCtx.paid, note }));
+    data.cuts.push(touch({ id: uid(), clientId: cutCtx.clientId, date, amount, paid, note }));
+    if (c && c.skipUntil) { delete c.skipUntil; touch(c); }
   }
   closeSheet("cut-overlay");
   changed();
@@ -875,9 +996,10 @@ function deleteCut() {
 }
 
 /* ================= client modal ================= */
-let clCtx = { id: null, group: "A", freq: 7 };
+let clCtx = { id: null, group: "A", freq: 7, billing: "percut" };
 function openClientModal(id) {
-  clCtx = { id: id || null, group: "A", freq: 7 };
+  clCtx = { id: id || null, group: "A", freq: 7, billing: "percut" };
+  const abtn = document.getElementById("cl-archive");
   if (id) {
     const c = data.clients.find(x => x.id === id);
     document.getElementById("cl-title").textContent = "Edit client";
@@ -886,14 +1008,15 @@ function openClientModal(id) {
     document.getElementById("cl-phone").value = c.phone || "";
     document.getElementById("cl-price").value = c.price || "";
     document.getElementById("cl-notes").value = c.notes || "";
-    clCtx.group = c.group; clCtx.freq = c.freq;
-    document.getElementById("cl-delete").style.display = "";
+    clCtx.group = c.group; clCtx.freq = c.freq; clCtx.billing = c.billing || "percut";
+    abtn.style.display = "";
+    abtn.textContent = c.active === false ? "Restore" : "Archive";
   } else {
     document.getElementById("cl-title").textContent = "New client";
     ["cl-name","cl-address","cl-phone","cl-price","cl-notes"].forEach(i => document.getElementById(i).value = "");
-    document.getElementById("cl-delete").style.display = "none";
+    abtn.style.display = "none";
   }
-  setClGroup(clCtx.group); setClFreq(clCtx.freq);
+  setClGroup(clCtx.group); setClFreq(clCtx.freq); setClBilling(clCtx.billing);
   document.getElementById("client-overlay").classList.add("open");
 }
 function setClGroup(g) {
@@ -907,6 +1030,12 @@ function setClFreq(f) {
   document.getElementById("cl-f7").className = f === 7 ? "on" : "";
   document.getElementById("cl-f14").className = f === 14 ? "on" : "";
 }
+function setClBilling(b) {
+  clCtx.billing = b;
+  document.getElementById("cl-bpercut").className = b === "percut" ? "on" : "";
+  document.getElementById("cl-bmonthly").className = b === "monthly" ? "on" : "";
+  document.getElementById("cl-price-label").textContent = b === "monthly" ? "Monthly amount $" : "Price per cut $";
+}
 function saveClient() {
   if (lockSave()) return;
   const name = document.getElementById("cl-name").value.trim();
@@ -917,10 +1046,11 @@ function saveClient() {
     phone: document.getElementById("cl-phone").value.trim(),
     price: parseFloat(document.getElementById("cl-price").value) || 0,
     notes: document.getElementById("cl-notes").value.trim(),
-    group: clCtx.group, freq: clCtx.freq, active: true
+    group: clCtx.group, freq: clCtx.freq, billing: clCtx.billing, active: true
   };
   if (clCtx.id) {
     const c = data.clients.find(x => x.id === clCtx.id);
+    rec.active = c.active;
     Object.assign(c, rec); touch(c);
   } else {
     data.clients.push(touch(Object.assign({ id: uid() }, rec)));
@@ -928,10 +1058,13 @@ function saveClient() {
   closeSheet("client-overlay");
   changed();
 }
-function deleteClient() {
-  if (!confirm("Delete this client? Their cut history stays in Money.")) return;
+function toggleArchive() {
   const c = data.clients.find(x => x.id === clCtx.id);
-  c.deleted = true; touch(c);
+  const archiving = c.active !== false;
+  const label = c.name !== "?" && c.name ? c.name : (c.address || "this client");
+  if (archiving && !confirm("Archive " + label + "? They'll disappear from the board and active client list, but their history stays and you can restore them anytime from the Archived tab.")) return;
+  c.active = archiving ? false : true;
+  touch(c);
   closeSheet("client-overlay");
   changed();
 }
@@ -1020,8 +1153,8 @@ function b64enc(s) { return btoa(unescape(encodeURIComponent(s))); }
 function b64dec(s) { return decodeURIComponent(escape(atob(s.replace(/\n/g, "")))); }
 
 function mergeData(local, remote) {
-  const out = { clients: [], cuts: [], expenses: [] };
-  ["clients", "cuts", "expenses"].forEach(key => {
+  const out = { clients: [], cuts: [], expenses: [], monthly: [] };
+  ["clients", "cuts", "expenses", "monthly"].forEach(key => {
     const map = new Map();
     (remote[key] || []).forEach(r => { if (r && r.id) map.set(r.id, r); });
     (local[key] || []).forEach(r => {
