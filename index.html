@@ -784,7 +784,7 @@ function renderClients() {
         '<div class="name">' + esc(c.name) + (c.active === false ? ' <span class="badge">ARCHIVED</span>' : '') + '</div>' +
         '<div class="meta"><span class="badge ' + c.group + '">' + (c.group === "AB" ? "A+B" : c.group) + '</span>' +
           '<span class="badge">' + (c.freq === 14 ? "2-WK" : "WKLY") + '</span> ' +
-          (c.billing === "monthly" ? '<span class="badge" style="border-color:var(--blue);color:var(--blue)">MONTHLY ' + fmtMoney(+c.price || 0) + '</span>' : fmtMoney(+c.price || 0)) + '</div>' +
+          (c.billing === "monthly" ? '<span class="badge" style="border-color:var(--blue);color:var(--blue)">MONTHLY</span>' : fmtMoney(+c.price || 0)) + '</div>' +
         '<div class="meta">' + (c.address ? esc(c.address) : '') +
           (c.phone ? ' · <a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : '') + '</div>' +
         '<div class="meta">' + (lastCut ? "Last cut " + fmtDayShort(lastCut.date) + " · " + cuts.length + " cuts all-time" : "Never cut yet") +
