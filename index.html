@@ -375,7 +375,7 @@
         <button id="c-paid-no" onclick="setCutPaid(false)">Not yet</button>
       </div>
     </div>
-    <p class="note" id="cut-monthly-note" style="display:none;margin:-4px 0 12px">This client is billed monthly — tracked in the Money tab, not per cut.</p>
+    <p class="note" id="cut-monthly-note" style="display:none;margin:-4px 0 12px">This client is billed monthly — this cut gets bundled into their month-end total in the Money tab instead of asking paid/unpaid every visit.</p>
     <div class="field"><label>Note (optional)</label><input id="c-note" placeholder="edged, bagged, gate was locked..."></div>
     <div class="actions">
       <button class="btn danger" id="c-delete" onclick="deleteCut()" style="display:none">Delete</button>
@@ -511,11 +511,6 @@ function fmtSched(s) {
   return d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase() + " " + (d.getMonth() + 1) + "/" + d.getDate();
 }
 function dirUrl(addr) { return "https://maps.apple.com/?daddr=" + encodeURIComponent(addr) + "&dirflg=d"; }
-function currentMonthStr() { return todayStr().slice(0, 7); }
-function fmtMonthLabel(ym) {
-  const [y, m] = ym.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
-}
 function skipClient(id) {
   const c = data.clients.find(x => x.id === id);
   if (!c) return;
@@ -565,13 +560,10 @@ function renderDays() {
   cEl.innerHTML = "";
   cuts.forEach(x => {
     const c = data.clients.find(cl => cl.id === x.clientId);
-    const isMonthly = c && c.billing === "monthly";
     const row = document.createElement("div"); row.className = "rowline";
     row.innerHTML =
       '<div class="grow"><b>' + esc(c ? (c.name !== "?" && c.name ? c.name : c.address) : "?") + '</b><div class="sub">' + esc(c && c.address ? c.address : "") + (x.note ? " · " + esc(x.note) : "") + '</div></div>' +
-      (isMonthly
-        ? '<span class="paidtag" style="color:var(--blue)">MONTHLY</span>'
-        : '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span><span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>');
+      '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span><span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>';
     row.style.cursor = "pointer";
     row.addEventListener("click", () => openCutModal(x.clientId, x.id));
     cEl.appendChild(row);
@@ -736,7 +728,7 @@ function renderBoard() {
   order.forEach(([key, title]) => {
     const rows = buckets.get(key);
     rows.sort((a, b) => a.sort - b.sort || (a.c.address || a.c.name).localeCompare(b.c.address || b.c.name));
-    const money = rows.reduce((s, r) => s + (r.c.billing === "monthly" ? 0 : (+r.c.price || 0)), 0);
+    const money = rows.reduce((s, r) => s + (+r.c.price || 0), 0);
     const h = document.createElement("div");
     h.className = "dayhead" + (key === "today" ? " today" : "");
     h.innerHTML = esc(title) + "<small>" + rows.length + " · " + fmtMoney(money) + "</small>";
@@ -796,44 +788,39 @@ function renderClients() {
   });
 }
 
-function renderMonthlySection() {
-  const el = document.getElementById("monthlylist");
-  const ym = currentMonthStr();
-  const clients = live(data.clients).filter(c => c.active !== false && c.billing === "monthly");
-  let created = false;
-  const rows = clients.map(c => {
-    let rec = data.monthly.find(m => !m.deleted && m.clientId === c.id && m.month === ym);
-    if (!rec) {
-      rec = touch({ id: uid(), clientId: c.id, month: ym, amount: +c.price || 0, paid: false });
-      data.monthly.push(rec);
-      created = true;
-    }
-    return { c, rec };
-  });
-  if (created) { persistLocal(); schedulePush(); }
-
+function renderOwedGroup(listElId, totalElId, cuts, emptyMsg) {
+  const el = document.getElementById(listElId);
   el.innerHTML = "";
-  const owingRows = rows.filter(r => !r.rec.paid);
-  const owed = owingRows.reduce((s, r) => s + (+r.rec.amount || 0), 0);
-  document.getElementById("monthly-total").textContent = rows.length ? (owingRows.length ? fmtMoney(owed) + " owed" : "all collected") : "";
-  if (!rows.length) { el.innerHTML = '<div class="empty">No monthly-billing clients.</div>'; return; }
-  if (!owingRows.length) { el.innerHTML = '<div class="empty">All monthly clients paid up for ' + esc(fmtMonthLabel(ym)) + '. 💪</div>'; return; }
-  owingRows.sort((a, b) => (a.c.name || "").localeCompare(b.c.name || ""));
-  owingRows.forEach(({ c, rec }) => {
+  const total = cuts.reduce((s, x) => s + (+x.amount || 0), 0);
+  document.getElementById(totalElId).textContent = cuts.length ? fmtMoney(total) + " owed" : "";
+  const byClient = new Map();
+  cuts.forEach(x => {
+    if (!byClient.has(x.clientId)) byClient.set(x.clientId, []);
+    byClient.get(x.clientId).push(x);
+  });
+  const groups = Array.from(byClient.entries()).map(([clientId, list]) => ({
+    c: data.clients.find(cl => cl.id === clientId),
+    list: list.sort((a, b) => a.date.localeCompare(b.date)),
+    total: list.reduce((s, x) => s + (+x.amount || 0), 0)
+  })).sort((a, b) => (a.c ? (a.c.name !== "?" && a.c.name ? a.c.name : a.c.address) : "").localeCompare(b.c ? (b.c.name !== "?" && b.c.name ? b.c.name : b.c.address) : ""));
+  if (!groups.length) { el.innerHTML = '<div class="empty">' + emptyMsg + '</div>'; return; }
+  groups.forEach(g => {
     const row = document.createElement("div"); row.className = "rowline";
+    const dates = g.list.map(x => fmtDayShort(x.date)).join(", ");
     row.innerHTML =
-      '<div class="grow"><b>' + esc(c.name !== "?" && c.name ? c.name : (c.address || "?")) + '</b><div class="sub">' + esc(fmtMonthLabel(ym)) + '</div></div>' +
-      '<span class="amt">' + fmtMoney(+rec.amount || 0) + '</span>' +
-      '<button class="btn pay">Mark paid</button>';
-    row.querySelector("button").addEventListener("click", () => {
-      rec.paid = true; touch(rec); changed();
+      '<div class="grow"><b>' + esc(g.c ? (g.c.name !== "?" && g.c.name ? g.c.name : g.c.address) : "?") + '</b><div class="sub">' +
+        g.list.length + ' cut' + (g.list.length === 1 ? "" : "s") + ' · ' + esc(dates) + '</div></div>' +
+      '<span class="amt">' + fmtMoney(g.total) + '</span>' +
+      '<button class="btn pay">Paid ✓</button>';
+    row.querySelector(".btn.pay").addEventListener("click", () => {
+      g.list.forEach(x => { x.paid = true; touch(x); });
+      changed();
     });
     el.appendChild(row);
   });
 }
 
 function renderMoney() {
-  renderMonthlySection();
   const t = todayStr();
   const cuts = live(data.cuts);
   const exps = live(data.expenses);
@@ -847,36 +834,12 @@ function renderMoney() {
   const yearExp = exps.filter(x => sameYear(x.date, t)).reduce((s, x) => s + (+x.amount || 0), 0);
   document.getElementById("m-exp-sub").textContent = fmtMoney(yearExp) + " this year";
 
-  /* unpaid — one row per client, even if they owe for multiple cuts */
-  const unpaidEl = document.getElementById("unpaidlist");
-  unpaidEl.innerHTML = "";
+  /* unpaid — split per-cut clients from monthly-billing clients, one row per client */
   const unpaid = cuts.filter(x => !x.paid);
-  document.getElementById("unpaid-total").textContent = fmtMoney(unpaid.reduce((s, x) => s + (+x.amount || 0), 0)) + " owed";
-  const byClient = new Map();
-  unpaid.forEach(x => {
-    if (!byClient.has(x.clientId)) byClient.set(x.clientId, []);
-    byClient.get(x.clientId).push(x);
-  });
-  const groups = Array.from(byClient.entries()).map(([clientId, list]) => ({
-    c: data.clients.find(cl => cl.id === clientId),
-    list: list.sort((a, b) => a.date.localeCompare(b.date)),
-    total: list.reduce((s, x) => s + (+x.amount || 0), 0)
-  })).sort((a, b) => (a.c ? (a.c.name !== "?" && a.c.name ? a.c.name : a.c.address) : "").localeCompare(b.c ? (b.c.name !== "?" && b.c.name ? b.c.name : b.c.address) : ""));
-  if (!groups.length) unpaidEl.innerHTML = '<div class="empty">Nobody owes you. 💪</div>';
-  groups.forEach(g => {
-    const row = document.createElement("div"); row.className = "rowline";
-    const dates = g.list.map(x => fmtDayShort(x.date)).join(", ");
-    row.innerHTML =
-      '<div class="grow"><b>' + esc(g.c ? (g.c.name !== "?" && g.c.name ? g.c.name : g.c.address) : "?") + '</b><div class="sub">' +
-        g.list.length + ' cut' + (g.list.length === 1 ? "" : "s") + ' · ' + esc(dates) + '</div></div>' +
-      '<span class="amt">' + fmtMoney(g.total) + '</span>' +
-      '<button class="btn pay">Paid ✓</button>';
-    row.querySelector(".btn.pay").addEventListener("click", () => {
-      g.list.forEach(x => { x.paid = true; touch(x); });
-      changed();
-    });
-    unpaidEl.appendChild(row);
-  });
+  const unpaidPerCut = unpaid.filter(x => { const c = data.clients.find(cl => cl.id === x.clientId); return !c || c.billing !== "monthly"; });
+  const unpaidMonthly = unpaid.filter(x => { const c = data.clients.find(cl => cl.id === x.clientId); return c && c.billing === "monthly"; });
+  renderOwedGroup("unpaidlist", "unpaid-total", unpaidPerCut, "Nobody owes you. 💪");
+  renderOwedGroup("monthlylist", "monthly-total", unpaidMonthly, "All monthly clients paid up. 💪");
 
   /* expenses */
   const expEl = document.getElementById("expenselist");
@@ -897,13 +860,10 @@ function renderMoney() {
   histEl.innerHTML = "";
   cuts.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 40).forEach(x => {
     const c = data.clients.find(cl => cl.id === x.clientId);
-    const isMonthly = c && c.billing === "monthly";
     const row = document.createElement("div"); row.className = "rowline";
     row.innerHTML =
       '<div class="grow"><b>' + esc(c ? (c.name !== "?" && c.name ? c.name : c.address) : "?") + '</b><div class="sub">' + fmtDayShort(x.date) + '</div></div>' +
-      (isMonthly
-        ? '<span class="paidtag" style="color:var(--blue)">MONTHLY</span>'
-        : '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span><span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>');
+      '<span class="paidtag ' + (x.paid ? 'paid">PAID' : 'unpaid">UNPAID') + '</span><span class="amt pos">' + fmtMoney(+x.amount || 0) + '</span>';
     row.style.cursor = "pointer";
     row.addEventListener("click", () => openCutModal(x.clientId, x.id));
     histEl.appendChild(row);
@@ -957,7 +917,6 @@ function openCutModal(clientId, cutId) {
   const isMonthly = c && c.billing === "monthly";
   cutCtx = { clientId, cutId: cutId || null, paid: true };
   document.getElementById("cut-title").textContent = (cutId ? "Edit cut — " : "Log cut — ") + (c ? (c.name !== "?" && c.name ? c.name : c.address) : "");
-  document.getElementById("cut-amount-wrap").style.display = isMonthly ? "none" : "";
   document.getElementById("cut-paid-wrap").style.display = isMonthly ? "none" : "";
   document.getElementById("cut-monthly-note").style.display = isMonthly ? "" : "none";
   if (cutId) {
@@ -969,9 +928,10 @@ function openCutModal(clientId, cutId) {
     document.getElementById("c-delete").style.display = "";
   } else {
     document.getElementById("c-date").value = todayStr();
-    document.getElementById("c-amount").value = (!isMonthly && c && c.price) ? c.price : "";
+    document.getElementById("c-amount").value = c && c.price ? c.price : "";
     document.getElementById("c-note").value = "";
     document.getElementById("c-delete").style.display = "none";
+    cutCtx.paid = isMonthly ? false : true;
   }
   setCutPaid(cutCtx.paid);
   document.getElementById("cut-overlay").classList.add("open");
@@ -984,18 +944,16 @@ function setCutPaid(v) {
 function saveCut() {
   if (lockSave()) return;
   const c = data.clients.find(x => x.id === cutCtx.clientId);
-  const isMonthly = c && c.billing === "monthly";
   const date = document.getElementById("c-date").value;
-  const amount = isMonthly ? 0 : parseFloat(document.getElementById("c-amount").value);
-  if (!date || (!isMonthly && isNaN(amount))) { alert("Need a date and an amount."); return; }
-  const paid = isMonthly ? true : cutCtx.paid;
+  const amount = parseFloat(document.getElementById("c-amount").value);
+  if (!date || isNaN(amount)) { alert("Need a date and an amount."); return; }
   const note = document.getElementById("c-note").value.trim();
   if (cutCtx.cutId) {
     const x = data.cuts.find(k => k.id === cutCtx.cutId);
-    Object.assign(x, { date, amount, paid, note });
+    Object.assign(x, { date, amount, paid: cutCtx.paid, note });
     touch(x);
   } else {
-    data.cuts.push(touch({ id: uid(), clientId: cutCtx.clientId, date, amount, paid, note }));
+    data.cuts.push(touch({ id: uid(), clientId: cutCtx.clientId, date, amount, paid: cutCtx.paid, note }));
     if (c && c.skipUntil) { delete c.skipUntil; touch(c); }
   }
   closeSheet("cut-overlay");
@@ -1048,7 +1006,6 @@ function setClBilling(b) {
   clCtx.billing = b;
   document.getElementById("cl-bpercut").className = b === "percut" ? "on" : "";
   document.getElementById("cl-bmonthly").className = b === "monthly" ? "on" : "";
-  document.getElementById("cl-price-label").textContent = b === "monthly" ? "Monthly amount $" : "Price per cut $";
 }
 function saveClient() {
   if (lockSave()) return;
